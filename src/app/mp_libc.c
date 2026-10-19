@@ -101,3 +101,73 @@ double tan(double x)
         return -sign * sin_small(half_pi * 2 - x) / cos_small(half_pi * 2 - x);
     return sign * sin_small(x) / cos_small(x);
 }
+
+/* Ogg Vorbis (stb_vorbis) and Game_Music_Emu: tables made at start */
+static double reduce_pi(double x, int *neg_sin, int *neg_cos)
+{
+    /* to 0 <= x <= pi/2, with the signs of sin and cos */
+    const double pi = 3.14159265358979323846, two_pi = 2 * pi;
+    *neg_sin = 0;
+    *neg_cos = 0;
+    if (x < 0) {
+        x = -x;
+        *neg_sin = 1;
+    }
+    if (x >= two_pi)
+        x -= two_pi * (double)(long long)(x / two_pi);
+    if (x > pi) { /* sin(x) = -sin(x - pi), cos(x) = -cos(x - pi) */
+        x -= pi;
+        *neg_sin ^= 1;
+        *neg_cos ^= 1;
+    }
+    if (x > pi / 2) { /* sin(x) = sin(pi - x), cos(x) = -cos(pi - x) */
+        x = pi - x;
+        *neg_cos ^= 1;
+    }
+    return x;
+}
+
+double sin(double x)
+{
+    int ns, nc;
+    x = reduce_pi(x, &ns, &nc);
+    double s = sin_small(x);
+    return ns ? -s : s;
+}
+
+double cos(double x)
+{
+    int ns, nc;
+    x = reduce_pi(x, &ns, &nc);
+    double c = cos_small(x);
+    return nc ? -c : c;
+}
+
+double exp(double x)
+{
+    return pow(2.71828182845904523536, x);
+}
+
+double fmod(double x, double y)
+{
+    if (y == 0)
+        return 0;
+    double q = x / y;
+    q = (double)(long long)q; /* toward zero */
+    return x - q * y;
+}
+
+double ldexp(double x, int e)
+{
+    while (e > 0) {
+        int k = e > 60 ? 60 : e;
+        x *= (double)(1ULL << k);
+        e -= k;
+    }
+    while (e < 0) {
+        int k = -e > 60 ? 60 : -e;
+        x /= (double)(1ULL << k);
+        e += k;
+    }
+    return x;
+}

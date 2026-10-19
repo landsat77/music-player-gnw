@@ -37,7 +37,7 @@ enum {
     T_MODE_ALL, T_MODE_ONE, T_MODE_SHUFFLE, T_MODE_ONCE,
     T_ERR_FILE, T_ERR_FORMAT, T_ERR_MEMORY, T_ERR_FLASH,
     T_COPY, T_COPY2, T_POS, T_ROW, T_TEMPO, T_NOTHING, T_HELP_BROWSER, T_HELP_PLAYING,
-    T_ERR_NO_SF2, T_COPY_SF2, T_VOICES,
+    T_ERR_NO_SF2, T_COPY_SF2, T_VOICES, T_COPY_MUSIC,
     T_COUNT
 };
 static const char *const texts[2][T_COUNT] = {
@@ -51,6 +51,7 @@ static const char *const texts[2][T_COUNT] = {
         "A:open B:back GAME:playing TIME:mode",
         "A:pause  </>:track  ^v:seek  B:back",
         "No SoundFont (.sf2) in /music", "Copying the SoundFont to the flash", "Voices",
+        "Copying the music to the flash",
     },
     {
         "Music Player", "Lecture en cours", "Pas de musique ici", "Pas de dossier /music sur la carte SD",
@@ -62,6 +63,7 @@ static const char *const texts[2][T_COUNT] = {
         "A:ouvrir B:retour GAME:lecture TIME:mode",
         "A:pause </>:piste ^v:avance B:retour",
         "Pas de SoundFont (.sf2) dans /music", "Copie de la SoundFont en flash", "Voix",
+        "Copie de la musique en flash",
     },
 };
 static int lang;
@@ -809,7 +811,7 @@ static void draw_progress(uint32_t done, uint32_t total, int what)
     mp_draw_begin(mp_plat_time_ms());
     mp_fill(0, 0, MP_WIDTH, MP_HEIGHT, C_BG);
     draw_header(T(T_TITLE));
-    const char *a = T(what == 1 ? T_COPY_SF2 : T_COPY), *b = T(T_COPY2);
+    const char *a = T(what == 1 ? T_COPY_SF2 : what == 2 ? T_COPY_MUSIC : T_COPY), *b = T(T_COPY2);
     mp_text(center_x(a), 90, a, C_TEXT, 316);
     mp_text(center_x(b), 104, b, C_DIM, 316);
     mp_rect(39, 124, MP_WIDTH - 78, 12, C_LINE);
@@ -908,11 +910,21 @@ static void playing_input(uint32_t p)
         paused = !paused;
         dirty = true;
     }
-    if (p & MP_BTN_RIGHT)
-        step_track(1, true);
+    /* left / right: the tracks of a file first (chiptunes), then the files */
+    if (p & MP_BTN_RIGHT) {
+        if (mp_player_is_open() && mp_player_step_sub(1))
+            dirty = true;
+        else
+            step_track(1, true);
+    }
     if (p & MP_BTN_LEFT) {
         if (mp_player_is_open() && mp_player_position_ms() > 3000) {
-            play_index(pl_index); /* the start of this track */
+            if (mp_player_step_sub(0)) /* the start of this track */
+                dirty = true;
+            else
+                play_index(pl_index);
+        } else if (mp_player_is_open() && mp_player_step_sub(-1)) {
+            dirty = true;
         } else {
             step_track(-1, true);
         }

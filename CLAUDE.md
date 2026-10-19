@@ -113,6 +113,60 @@ Watch Retro-Go SD).
 - Seeking replays CC / program / tempo events from the start without notes.
 - TSF needs `powf`, `expf`, `tan`: in `mp_libc.c`.
 
+## WAV, FLAC, Ogg Vorbis (`mp_pcm.c`, `src/codecs/`)
+
+- dr_wav / dr_flac read through callbacks over the firmware's FILE API;
+  stb_vorbis uses its stdio pull API (seeking is exact). All three allocate
+  on the player's heap (`mp_pcm.c` and the codecs are built with
+  `-include mp_glue.h`; dr_libs get allocation callbacks).
+- stb_vorbis: `STB_VORBIS_GNW` replaces alloca() (16 KB for the 8192
+  sample blocks: too much for the ~20 KB stack) with a buffer on the heap.
+  Its codebooks take ~200 KB of heap for a 44.1 kHz stereo file.
+- Channels averaged to mono (stb_vorbis is given one buffer per channel: its
+  own downmix adds the channels). Rates: the file's when supported, > 48
+  kHz halved by averaging (96 -> 48), otherwise 16.16 linear to 48 kHz.
+- Checked against ffmpeg (`-ac 1`): RMS error < 1 LSB for PCM / float /
+  Vorbis / FLAC; IMA ADPCM differs (~77 on 780 RMS) because ffmpeg uses
+  the exact `(2n+1)*step/8` while dr_wav uses the standard shifts.
+- gwemu idle: OGG 44.1 kHz 76%, FLAC 96k/24 57%, WAV 44.1k 16 bit 50%
+  (the emulated SD reads cost most there; MP3 192 kbps: ~80%).
+
+## Chiptunes (`mp_gme.c`, `src/gme/` with `GME_GNW`)
+
+- Game_Music_Emu @ f68963b, only NSF / NSFE / GBS / SPC / VGM / AY
+  (`gme_types.h`; the GYM, HES, KSS, SAP sources are not in the tree, nor
+  the MAME (GPL) and Nuked YM2612 cores: `VGM_YM2612_GENS`).
+- C++ without exceptions / RTTI. Not built as `CORE_CXX_SOURCES` (the SDK
+  would add `gw_core_cxx_support.cpp`, whose operator new takes memory from
+  the pools of our heap): own rules in the root Makefile, objects passed as
+  `CORE_EXTRA_OBJECTS`, redefine-syms applied. `mp_cxx.cpp`: new / delete
+  on mp_malloc, `std::nothrow`, `__throw_length_error`, `__cxa_*` stubs.
+  `-Os` (code size) and `-fwrapv` (the YM2612 phase counters overflow on
+  purpose). `mp_libc.c` adds sin, cos, exp, fmod, ldexp (table setup).
+- `GME_DISABLE_STEREO_DEPTH=1`: no Effects_Buffer (it took ~100 KB).
+- `gme_open_data_inplace()` (gme.cpp): `load_mem()` instead of a reader, so
+  VGM / SPC / AY play the caller's data in place; `Gme_File::track_pos()`
+  returns that data (single-track formats load it again at each start).
+  mp_player.c `load_whole()`: the file in RAM when it is under half the
+  largest free block, else copied once to the flash blob store (key
+  `gme|crc of 512 bytes|size|name`); gzip (VGZ) is inflated on the way with
+  tinfl (32 KB dictionary when streaming to the flash).
+- emu2413 (YM2413, VRC7): its 128 KB static `tll_table` is a 32 KB byte
+  table on the heap while an OPLL exists (values < 256).
+- Output 32 kHz stereo, averaged to mono. Lengths: the file's (NSFE, SPC
+  ID666, VGM, AY) or `<name>.m3u` (not for VGM / VGZ / SPC), else 2:30;
+  then an 8 s fade. Repeat one: no fade. The end of a track starts the next
+  one of the file; left / right go through the tracks
+  (`mp_player_step_sub()`), then the files. Locator: track << 24 | ms.
+- Heap after open: NSF ~54 KB, AY ~95 KB, GBS ~104 KB, SPC ~143 KB (with
+  the file), VGM ~210 KB + the file (YM2612 GENS tables 156 KB).
+- gwemu idle: SPC 8 voices + echo 75%, VGM YM2612 78%, GBS 79%, AY 81%,
+  NSF 82%.
+- Test files: `test.nsf` / `test.vgz` of the libgme repo, `nightmode.gbs`
+  of gbsplay; SPC / AY / NSFE files were made by hand (a script in the
+  session; an SPC700 program keying 8 voices with echo, a Z80 player
+  writing the AY registers).
+
 ## Known limits
 
 - Stock libxmp-lite fails on some files (e.g. RetrigSlide.s3m from the
@@ -137,6 +191,8 @@ Watch Retro-Go SD).
   (`mp_utf8_to_latin1`; the firmware's FatFs has `FF_LFN_UNICODE 2`). Use
   `LC_ALL=C.UTF-8` with mtools, else accented names land garbled in the
   SD image.
+- v1.2.0: WAV, FLAC, Ogg Vorbis, chiptunes (+177 KB of code: the RAM_EMU
+  heap went from ~545 to ~350 KB).
 
 ---
 

@@ -6,7 +6,8 @@
 #
 # SD card (Retro-Go SD v2.0.0-rc1 or later):
 #   /homebrews/MusicPlayer.bin (this homebrew)
-#   /music/...                 (the music: MOD, S3M, XM, IT, MP3)
+#   /music/...                 (the music: modules, MP3, WAV, FLAC, OGG,
+#                               MIDI + a .sf2, chiptunes)
 #
 # Verbose compiler lines: make V=
 
@@ -34,15 +35,30 @@ CORE_C_SOURCES := $(XMP_C_SOURCES) \
 $(APP_DIR)/mp_core.c \
 $(APP_DIR)/mp_player.c \
 $(APP_DIR)/mp_midi.c \
+$(APP_DIR)/mp_pcm.c \
+$(APP_DIR)/mp_gme.c \
+src/codecs/miniz_tinfl.c \
+src/gme/ext/emu2413.c \
 $(APP_DIR)/mp_draw.c \
 $(APP_DIR)/mp_font.c \
 $(APP_DIR)/mp_alloc.c \
 $(APP_DIR)/mp_libc.c \
 $(APP_DIR)/mp_main.c
 
-CORE_C_INCLUDES := -I$(APP_DIR) -I$(XMP_DIR)/include -I$(XMP_DIR)/src -I$(MP3_DIR) -Isrc/midi
+CORE_C_INCLUDES := -I$(APP_DIR) -I$(XMP_DIR)/include -I$(XMP_DIR)/src -I$(MP3_DIR) -Isrc/midi \
+-Isrc/codecs -Isrc/gme
 
-CORE_C_DEFS := -DPROJECT_KIND_HOMEBREW=1 -DLIBXMP_GNW -DLIBXMP_CORE_PLAYER -DLIBXMP_STATIC
+CORE_C_DEFS := -DPROJECT_KIND_HOMEBREW=1 -DLIBXMP_GNW -DLIBXMP_CORE_PLAYER -DLIBXMP_STATIC \
+-DGME_GNW -DGME_DISABLE_STEREO_DEPTH=1 -DVGM_YM2612_GENS -DBLARGG_LITTLE_ENDIAN=1
+
+# Game_Music_Emu (C++, no exceptions / RTTI) on the player's heap: built by
+# the rules below, not as CORE_CXX_SOURCES (the SDK would add its own
+# operator new, gw_core_cxx_support.cpp; src/app/mp_cxx.cpp replaces it)
+GME_DIR := src/gme
+GME_CPP := $(notdir $(wildcard $(GME_DIR)/*.cpp))
+BUILD_DIR ?= build/$(PROJECT_KIND)
+GME_OBJECTS := $(addprefix $(BUILD_DIR)/gme_,$(GME_CPP:.cpp=.o)) $(BUILD_DIR)/gme_mp_cxx.o
+CORE_EXTRA_OBJECTS += $(GME_OBJECTS)
 
 OPT := -O2
 
@@ -60,6 +76,21 @@ XMP_OBJECTS := $(addprefix $(BUILD_DIR)/,$(notdir $(XMP_C_SOURCES:.c=.o)))
 XMP_FLAGS := -include $(APP_DIR)/mp_glue.h -std=gnu11 -w
 $(XMP_OBJECTS): CFLAGS += $(XMP_FLAGS)
 $(C_OBJECTS): Makefile
+
+# the codecs on the player's heap too
+CODEC_OBJECTS := $(BUILD_DIR)/mp_pcm.o $(BUILD_DIR)/emu2413.o $(BUILD_DIR)/miniz_tinfl.o
+$(CODEC_OBJECTS): CFLAGS += -include $(APP_DIR)/mp_glue.h -w -Os
+
+GME_CXXFLAGS = $(CXXFLAGS) -w -fwrapv -include $(APP_DIR)/mp_glue.h -Os
+$(BUILD_DIR)/gme_%.o: $(GME_DIR)/%.cpp $(REDEFINE_SYMS_FILE) Makefile | $(BUILD_DIR)
+	$(V)$(ECHO) [ CXX ] $(notdir $<)
+	$(V)$(CXX) -c $(GME_CXXFLAGS) $< -o $@
+	$(V)$(CP) --redefine-syms=$(REDEFINE_SYMS_FILE) $@
+
+$(BUILD_DIR)/gme_mp_cxx.o: $(APP_DIR)/mp_cxx.cpp $(REDEFINE_SYMS_FILE) Makefile | $(BUILD_DIR)
+	$(V)$(ECHO) [ CXX ] $(notdir $<)
+	$(V)$(CXX) -c $(CXXFLAGS) $< -o $@
+	$(V)$(CP) --redefine-syms=$(REDEFINE_SYMS_FILE) $@
 
 #######################################
 # Packed header version

@@ -9,6 +9,11 @@
  *  - MP3 (layer III): minimp3, streamed from the file; ID3v1 / ID3v2 tags,
  *    duration from the Xing / Info / VBRI header or the bitrate; resampled
  *    when the audio output cannot play its rate.
+ *  - MIDI: mp_midi.c (TinySoundFont, a SoundFont in the flash).
+ *  - WAV, FLAC, Ogg Vorbis: mp_pcm.c (dr_wav, dr_flac, stb_vorbis).
+ *  - Chiptunes (NSF, GBS, SPC, VGM...): mp_gme.c (Game_Music_Emu); the
+ *    file in RAM (gzip VGZ inflated with tinfl), or in the external flash
+ *    when it is too big. A file may hold several tracks ("sub-tracks").
  */
 #include <stdio.h>
 #include <stdlib.h>
@@ -27,6 +32,11 @@
 #include "mp_platform.h"
 #include "mp_player.h"
 #include "mp_midi.h"
+#include "mp_pcm.h"
+#include "mp_gme.h"
+
+#define TINFL_HEADER_FILE_ONLY
+#include "miniz.h"
 
 #define MODULE_RATE 44100
 
@@ -103,7 +113,8 @@ static bool is_midi_name(const char *name)
 
 bool mp_player_is_music(const char *name)
 {
-    return is_module_name(name) || is_mp3_name(name) || is_midi_name(name);
+    return is_module_name(name) || is_mp3_name(name) || is_midi_name(name) ||
+           mp_pcm_is_music(name) || mp_gme_is_music(name);
 }
 
 static const char *base_name(const char *path)
@@ -1006,6 +1017,289 @@ static int midi_open(const char *path)
 }
 
 /* ------------------------------------------------------------------ */
+/* WAV, FLAC, Ogg Vorbis                                              */
+/* ------------------------------------------------------------------ */
+static int pcm_open(const char *path)
+{
+    mp_pcm_info_t pi;
+    int r = mp_pcm_open(path, &pi);
+    if (r != 0)
+        return r == -1 ? MP_ERR_FILE : r == -3 ? MP_ERR_MEMORY : MP_ERR_FORMAT;
+    snprintf(info.title, sizeof(info.title), "%s", pi.title);
+    trim(info.title);
+    if (!info.title[0])
+        title_from_name(path);
+    snprintf(info.artist, sizeof(info.artist), "%s", pi.artist);
+    trim(info.artist);
+    snprintf(info.format, sizeof(info.format), "%s", pi.format);
+    info.duration_ms = pi.duration_ms;
+    out_rate = mp_pcm_rate();
+    return MP_OK;
+}
+
+/* ------------------------------------------------------------------ */
+/* Chiptunes                                                          */
+/* ------------------------------------------------------------------ */
+static uint8_t *gme_ram;           /* the file in RAM, or NULL (flash) */
+static char gme_name[72];          /* the title from the file name */
+static char gme_ext[8];
+
+/* The whole file (inflated if gzip) in RAM, or in the flash when it does
+ * not fit (copied once). Returns the data, or NULL with *err set. */
+static const uint8_t *load_whole(const char *path, uint32_t *size_out, int *err)
+{
+    FILE *f = fopen(path, "rb");
+    if (!f) {
+        *err = MP_ERR_FILE;
+        return NULL;
+    }
+    long fsize = file_size(f);
+    uint8_t h[10];
+    bool gz = fread(h, 1, 10, f) == 10 && h[0] == 0x1f && h[1] == 0x8b && h[2] == 8;
+    uint32_t size = (uint32_t)fsize;
+    long data_pos = 0;
+    if (gz) {
+        /* the gzip header, then raw deflate; ISIZE at the end */
+        long pos = 10;
+        int flg = h[3];
+        if (flg & 4) { /* FEXTRA */
+            uint8_t x[2];
+            fseek(f, pos, SEEK_SET);
+            if (fread(x, 1, 2, f) != 2)
+                gz = false;
+            pos += 2 + (x[0] | x[1] << 8);
+        }
+        for (int k = 0; k < 2; k++) { /* FNAME, FCOMMENT */
+            if (!(flg & (8 << k)))
+                continue;
+            fseek(f, pos, SEEK_SET);
+            int c;
+            do {
+                c = fgetc(f);
+                pos++;
+            } while (c > 0);
+        }
+        if (flg & 2)
+            pos += 2; /* FHCRC */
+        uint8_t t[4];
+        fseek(f, fsize - 4, SEEK_SET);
+        if (fread(t, 1, 4, f) != 4)
+            gz = false;
+        size = (uint32_t)(t[0] | t[1] << 8 | t[2] << 16 | (uint32_t)t[3] << 24);
+        data_pos = pos;
+    }
+    if (size < 16 || size > 64u * 1024 * 1024) {
+        fclose(f);
+        *err = MP_ERR_FORMAT;
+        return NULL;
+    }
+    /* RAM when it leaves room for the emulator */
+    bool in_ram = size <= mp_heap_largest() / 2 && !getenv_force_flash();
+    uint8_t *ram = NULL;
+    const uint8_t *blob = NULL;
+    char key[96];
+    if (in_ram) {
+        ram = mp_malloc(size);
+        if (!ram)
+            in_ram = false;
+    }
+    if (!in_ram) {
+        uint8_t head[512];
+        fseek(f, 0, SEEK_SET);
+        size_t n = fread(head, 1, sizeof(head), f);
+        snprintf(key, sizeof(key), "gme|%08lx|%lu|%.60s", (unsigned long)crc32_update(0, head, n),
+                 (unsigned long)size, base_name(path));
+        uint32_t have = 0;
+        blob = mp_plat_flash_lookup(key, &have);
+        if (blob && have == size) {
+            fclose(f);
+            *size_out = size;
+            return blob;
+        }
+        blob = mp_plat_flash_begin(key, size);
+        if (!blob) {
+            fclose(f);
+            *err = MP_ERR_FLASH;
+            return NULL;
+        }
+        mp_plat_log("mp: copying %lu bytes of music to the flash\n", (unsigned long)size);
+    }
+    /* the copy */
+    bool ok = true;
+    uint32_t done = 0, report = 0;
+    uint8_t *in = mp_malloc(4096);
+    tinfl_decompressor *inf = NULL;
+    uint8_t *dict = NULL;
+    if (gz) {
+        inf = mp_malloc(sizeof(tinfl_decompressor));
+        dict = in_ram ? NULL : mp_malloc(TINFL_LZ_DICT_SIZE);
+        if (!inf || (!in_ram && !dict))
+            ok = false;
+        else
+            tinfl_init(inf);
+    }
+    if (!in)
+        ok = false;
+    if (flash_progress && !in_ram && ok)
+        flash_progress(0, size, 2);
+    fseek(f, data_pos, SEEK_SET);
+    size_t in_len = 0, in_pos = 0;
+    bool in_eof = false;
+    size_t dict_pos = 0;
+    while (ok && done < size) {
+        if (!gz) {
+            size_t n = fread(in, 1, 4096, f);
+            if (n == 0) {
+                ok = false;
+                break;
+            }
+            if (n > size - done)
+                n = size - done;
+            if (in_ram)
+                memcpy(ram + done, in, n);
+            else
+                ok = mp_plat_flash_append(in, (uint32_t)n);
+            done += (uint32_t)n;
+        } else {
+            if (in_pos == in_len && !in_eof) {
+                in_len = fread(in, 1, 4096, f);
+                in_pos = 0;
+                in_eof = in_len == 0;
+            }
+            size_t ib = in_len - in_pos;
+            uint8_t *obase = in_ram ? ram : dict;
+            uint8_t *onext = in_ram ? ram + done : dict + dict_pos;
+            size_t ob = in_ram ? size - done : TINFL_LZ_DICT_SIZE - dict_pos;
+            tinfl_status st = tinfl_decompress(inf, in + in_pos, &ib, obase, onext, &ob,
+                                               (in_eof ? 0 : TINFL_FLAG_HAS_MORE_INPUT) |
+                                                   (in_ram ? TINFL_FLAG_USING_NON_WRAPPING_OUTPUT_BUF : 0));
+            in_pos += ib;
+            if (ob > size - done)
+                ob = size - done;
+            if (!in_ram && ob) {
+                ok = mp_plat_flash_append(onext, (uint32_t)ob);
+                dict_pos = (dict_pos + ob) & (TINFL_LZ_DICT_SIZE - 1);
+            }
+            done += (uint32_t)ob;
+            if (st < 0 || (st == TINFL_STATUS_DONE && done < size) ||
+                (st == TINFL_STATUS_NEEDS_MORE_INPUT && in_eof)) {
+                ok = false;
+                break;
+            }
+            if (st == TINFL_STATUS_DONE)
+                break;
+        }
+        if (flash_progress && !in_ram && (done - report >= size / 20 || done == size)) {
+            report = done;
+            flash_progress(done, size, 2);
+        }
+        mp_plat_watchdog();
+    }
+    ok = ok && done == size;
+    mp_free(in);
+    mp_free(inf);
+    mp_free(dict);
+    fclose(f);
+    if (!ok) {
+        mp_plat_log("mp: %s: cannot load the file (%lu / %lu)\n", path, (unsigned long)done, (unsigned long)size);
+        if (in_ram)
+            mp_free(ram);
+        else
+            mp_plat_flash_abort();
+        *err = in_ram || done ? MP_ERR_FORMAT : MP_ERR_FLASH;
+        return NULL;
+    }
+    *size_out = size;
+    if (in_ram) {
+        gme_ram = ram;
+        return ram;
+    }
+    return mp_plat_flash_finish();
+}
+
+static void gme_info_fill(const mp_gme_track_t *t)
+{
+    int n = mp_gme_tracks(), k = mp_gme_track();
+    if (t->song[0])
+        snprintf(info.title, sizeof(info.title), "%s", t->song);
+    else if (n > 1)
+        snprintf(info.title, sizeof(info.title), "%.60s #%d", t->game[0] ? t->game : gme_name, k + 1);
+    else
+        snprintf(info.title, sizeof(info.title), "%s", t->game[0] ? t->game : gme_name);
+    if (t->song[0] && t->game[0] && t->author[0])
+        snprintf(info.artist, sizeof(info.artist), "%.34s - %.34s", t->game, t->author);
+    else
+        snprintf(info.artist, sizeof(info.artist), "%s", t->song[0] && t->game[0] ? t->game : t->author);
+    if (n > 1)
+        snprintf(info.format, sizeof(info.format), "%s %d/%d, %.18s", gme_ext, k + 1, n, t->system);
+    else
+        snprintf(info.format, sizeof(info.format), "%s, %.24s", gme_ext, t->system);
+    info.duration_ms = t->length_ms;
+}
+
+static int gme_start(int track)
+{
+    mp_gme_track_t t;
+    if (mp_gme_start(track, &t) != 0)
+        return MP_ERR_FORMAT;
+    gme_info_fill(&t);
+    return MP_OK;
+}
+
+static int gme_open(const char *path)
+{
+    title_from_name(path);
+    snprintf(gme_name, sizeof(gme_name), "%s", info.title);
+    const char *e = ext_of(path);
+    int k = 0;
+    for (; e[k] && k < 7; k++)
+        gme_ext[k] = (char)toupper((unsigned char)e[k]);
+    gme_ext[k] = '\0';
+    uint32_t size = 0;
+    int err = MP_ERR_FORMAT;
+    const uint8_t *data = load_whole(path, &size, &err);
+    if (!data)
+        return err;
+    info.in_flash = gme_ram == NULL;
+    /* <name>.m3u next to it: the names and lengths of the tracks (the
+     * formats with several tracks per file) */
+    bool multi = !ieq(e, "vgm") && !ieq(e, "vgz") && !ieq(e, "spc");
+    char m3u[256];
+    snprintf(m3u, sizeof(m3u), "%s", path);
+    char *dot = strrchr(m3u, '.');
+    if (dot && dot > strrchr(m3u, '/'))
+        snprintf(dot, sizeof(m3u) - (size_t)(dot - m3u), ".m3u");
+    out_rate = mp_gme_rate_for(path);
+    int r = mp_gme_open(data, (long)size, out_rate, multi ? m3u : NULL);
+    if (r != 0)
+        return r == -3 ? MP_ERR_MEMORY : MP_ERR_FORMAT;
+    return gme_start(0);
+}
+
+static void gme_close(void)
+{
+    mp_gme_close();
+    mp_free(gme_ram);
+    gme_ram = NULL;
+}
+
+static int gme_render(int16_t *out, int frames, bool loop)
+{
+    mp_gme_set_loop(loop);
+    int n = mp_gme_render(out, frames);
+    while (n < frames) {
+        /* the end of a track: the next one of the file (repeat one: the
+         * same again, when it ended on silence) */
+        int next = mp_gme_track() + (loop ? 0 : 1);
+        if (next >= mp_gme_tracks() || gme_start(next) != MP_OK)
+            break;
+        mp_gme_set_loop(loop);
+        n += mp_gme_render(out + n, frames - n);
+    }
+    return n;
+}
+
+/* ------------------------------------------------------------------ */
 /* API                                                                */
 /* ------------------------------------------------------------------ */
 int mp_player_open(const char *path, mp_progress_cb progress)
@@ -1023,6 +1317,12 @@ int mp_player_open(const char *path, mp_progress_cb progress)
     } else if (is_module_name(path)) {
         kind = MP_KIND_MODULE;
         r = module_open(path);
+    } else if (mp_pcm_is_music(path)) {
+        kind = MP_KIND_PCM;
+        r = pcm_open(path);
+    } else if (mp_gme_is_music(path)) {
+        kind = MP_KIND_GME;
+        r = gme_open(path);
     } else {
         r = MP_ERR_FORMAT;
     }
@@ -1042,6 +1342,10 @@ void mp_player_close(void)
         mp3_close();
     else if (kind == MP_KIND_MIDI)
         mp_midi_close();
+    else if (kind == MP_KIND_PCM)
+        mp_pcm_close();
+    else if (kind == MP_KIND_GME)
+        gme_close();
     kind = MP_KIND_NONE;
     info.kind = MP_KIND_NONE;
 }
@@ -1076,6 +1380,16 @@ int mp_player_render(int16_t *out, int frames, bool loop)
     }
     if (kind == MP_KIND_MIDI)
         return mp_midi_render(out, frames, loop);
+    if (kind == MP_KIND_PCM) {
+        int n = mp_pcm_render(out, frames);
+        if (n < frames && loop) {
+            mp_pcm_seek_ms(0);
+            n += mp_pcm_render(out + n, frames - n);
+        }
+        return n;
+    }
+    if (kind == MP_KIND_GME)
+        return gme_render(out, frames, loop);
     return 0;
 }
 
@@ -1087,7 +1401,21 @@ uint32_t mp_player_position_ms(void)
         return mp3_position_ms();
     if (kind == MP_KIND_MIDI)
         return mp_midi_position_ms();
+    if (kind == MP_KIND_PCM)
+        return mp_pcm_position_ms();
+    if (kind == MP_KIND_GME)
+        return mp_gme_position_ms();
     return 0;
+}
+
+bool mp_player_step_sub(int dir)
+{
+    if (kind != MP_KIND_GME)
+        return false;
+    int t = mp_gme_track() + dir;
+    if (t < 0 || t >= mp_gme_tracks())
+        return false;
+    return gme_start(t) == MP_OK;
 }
 
 void mp_player_seek(int direction)
@@ -1106,6 +1434,15 @@ void mp_player_seek(int direction)
     } else if (kind == MP_KIND_MIDI) {
         uint32_t now = mp_midi_position_ms();
         mp_midi_seek_ms(direction > 0 ? now + 10000 : (now > 10000 ? now - 10000 : 0));
+    } else if (kind == MP_KIND_PCM) {
+        uint32_t now = mp_pcm_position_ms();
+        mp_pcm_seek_ms(direction > 0 ? now + 10000 : (now > 10000 ? now - 10000 : 0));
+    } else if (kind == MP_KIND_GME) {
+        uint32_t now = mp_gme_position_ms();
+        uint32_t to = direction > 0 ? now + 10000 : (now > 10000 ? now - 10000 : 0);
+        if (info.duration_ms && to >= info.duration_ms)
+            return;
+        mp_gme_seek_ms(to);
     }
 }
 
@@ -1117,6 +1454,10 @@ uint32_t mp_player_locator(void)
         return mp3_position_ms();
     if (kind == MP_KIND_MIDI)
         return mp_midi_position_ms();
+    if (kind == MP_KIND_PCM)
+        return mp_pcm_position_ms();
+    if (kind == MP_KIND_GME) /* the track, and the time (24 bits: 4.6 h) */
+        return (uint32_t)mp_gme_track() << 24 | (mp_gme_position_ms() & 0xffffff);
     return 0;
 }
 
@@ -1133,6 +1474,15 @@ void mp_player_relocate(uint32_t locator)
     } else if (kind == MP_KIND_MIDI) {
         if (locator > 0)
             mp_midi_seek_ms(locator);
+    } else if (kind == MP_KIND_PCM) {
+        if (locator > 0)
+            mp_pcm_seek_ms(locator);
+    } else if (kind == MP_KIND_GME) {
+        int t = (int)(locator >> 24);
+        if (t != mp_gme_track() && gme_start(t) != MP_OK)
+            return;
+        if (locator & 0xffffff)
+            mp_gme_seek_ms(locator & 0xffffff);
     }
 }
 

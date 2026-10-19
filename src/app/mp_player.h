@@ -18,7 +18,7 @@ enum {
     MP_ERR_NO_SF2 = -5,   /* a MIDI file without a SoundFont */
 };
 
-enum { MP_KIND_NONE, MP_KIND_MODULE, MP_KIND_MP3, MP_KIND_MIDI };
+enum { MP_KIND_NONE, MP_KIND_MODULE, MP_KIND_MP3, MP_KIND_MIDI, MP_KIND_PCM, MP_KIND_GME };
 
 typedef struct {
     int kind;
@@ -38,7 +38,7 @@ typedef struct {
 } mp_module_status_t;
 
 /* progress of a copy to the flash (done / total bytes): what = 0 the
- * samples of a module, 1 a SoundFont */
+ * samples of a module, 1 a SoundFont, 2 a chiptune file (big VGM) */
 typedef void (*mp_progress_cb)(uint32_t done, uint32_t total, int what);
 
 bool mp_player_is_music(const char *name);
@@ -58,6 +58,10 @@ int mp_player_rate(void);
 int mp_player_render(int16_t *out, int frames, bool loop);
 
 uint32_t mp_player_position_ms(void);
+/* files with several tracks (chiptunes): to the next (dir 1) / previous
+ * (-1) track of the file, or the start of this one (0); false: no such
+ * track (then the playlist moves to another file) */
+bool mp_player_step_sub(int dir);
 /* MP3: +-10 s, modules: +-1 position */
 void mp_player_seek(int direction);
 /* savestates: where the track is, and going back there */

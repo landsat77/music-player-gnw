@@ -281,6 +281,8 @@ static uint32_t btn_of(const char *s)
 }
 static const char *btn_name(uint32_t b) { (void)b; return ""; }
 
+void mp_plat_watchdog(void) {}
+
 void mp_plat_service(bool idle)
 {
     if (play_path[0]) {

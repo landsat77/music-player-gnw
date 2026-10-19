@@ -15,7 +15,11 @@ MP3 = ../src/mp3
 include ../src/xmp/sources.mk
 
 XMP_SOURCES = $(addprefix $(XMP)/,$(XMP_FILES))
-APP_FILES = mp_core.c mp_player.c mp_midi.c mp_draw.c mp_font.c mp_alloc.c
+APP_FILES = mp_core.c mp_player.c mp_midi.c mp_draw.c mp_font.c mp_alloc.c mp_gme.c
+GME = ../src/gme
+GME_CPP = $(notdir $(wildcard $(GME)/*.cpp))
+GME_OBJECTS = $(addprefix $(BUILD_DIR)/g_,$(GME_CPP:.cpp=.o)) $(BUILD_DIR)/g_emu2413.o
+EXTRA_OBJECTS = $(BUILD_DIR)/a_mp_pcm.o $(BUILD_DIR)/a_miniz_tinfl.o $(BUILD_DIR)/a_mp_cxx.o
 
 SAN ?= 0
 OPT ?= -O2 -g
@@ -24,8 +28,8 @@ OPT += -fsanitize=address,undefined -fno-omit-frame-pointer -DMP_HOST_SYSTEM_MAL
 LDFLAGS += -fsanitize=address,undefined
 endif
 
-DEFS = -DMP_HOST -DLIBXMP_GNW -DLIBXMP_CORE_PLAYER -DLIBXMP_STATIC
-INCLUDES = -I$(APP) -I$(XMP)/include -I$(XMP)/src -I$(MP3) -I../src/midi
+DEFS = -DMP_HOST -DGME_GNW -DGME_DISABLE_STEREO_DEPTH=1 -DVGM_YM2612_GENS -DBLARGG_LITTLE_ENDIAN=1 -DLIBXMP_GNW -DLIBXMP_CORE_PLAYER -DLIBXMP_STATIC
+INCLUDES = -I$(APP) -I$(XMP)/include -I$(XMP)/src -I$(MP3) -I../src/midi -I../src/codecs -I$(GME)
 WARN = -Wall -Wno-unused-function -Wno-sign-compare
 CFLAGS = $(OPT) -MMD -std=gnu11 $(DEFS) $(WARN) $(INCLUDES)
 
@@ -46,11 +50,27 @@ $(foreach f,$(XMP_FILES),$(eval $(call xmp_rule,$(f))))
 $(BUILD_DIR)/a_%.o: $(APP)/%.c | $(BUILD_DIR)
 	$(CC) -c $(CFLAGS) $< -o $@
 
+# the codecs and Game_Music_Emu on the player's heap
+$(BUILD_DIR)/a_mp_pcm.o: $(APP)/mp_pcm.c | $(BUILD_DIR)
+	$(CC) -c $(CFLAGS) -w -include $(APP)/mp_glue.h $< -o $@
+
+$(BUILD_DIR)/a_miniz_tinfl.o: ../src/codecs/miniz_tinfl.c | $(BUILD_DIR)
+	$(CC) -c $(CFLAGS) -w $< -o $@
+
+$(BUILD_DIR)/a_mp_cxx.o: $(APP)/mp_cxx.cpp | $(BUILD_DIR)
+	$(CXX) -c $(OPT) -MMD $(DEFS) $(INCLUDES) -fno-exceptions -fno-rtti $< -o $@
+
+$(BUILD_DIR)/g_%.o: $(GME)/%.cpp | $(BUILD_DIR)
+	$(CXX) -c $(OPT) -MMD $(DEFS) $(INCLUDES) -fno-exceptions -fno-rtti -fwrapv -w -include $(APP)/mp_glue.h $< -o $@
+
+$(BUILD_DIR)/g_emu2413.o: $(GME)/ext/emu2413.c | $(BUILD_DIR)
+	$(CC) -c $(CFLAGS) -w -include $(APP)/mp_glue.h $< -o $@
+
 $(BUILD_DIR)/h_mp_host.o: mp_host.c | $(BUILD_DIR)
 	$(CC) -c $(CFLAGS) $< -o $@
 
-$(TARGET): $(XMP_OBJECTS) $(APP_OBJECTS) $(BUILD_DIR)/h_mp_host.o
-	$(CC) $^ $(LDFLAGS) -lm -o $@
+$(TARGET): $(XMP_OBJECTS) $(APP_OBJECTS) $(EXTRA_OBJECTS) $(GME_OBJECTS) $(BUILD_DIR)/h_mp_host.o
+	$(CXX) $^ $(LDFLAGS) -lm -o $@
 
 -include $(wildcard $(BUILD_DIR)/*.d)
 

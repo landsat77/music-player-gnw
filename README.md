@@ -16,9 +16,18 @@ A music player for the Nintendo Game & Watch (Mario / Zelda) running
 | Impulse Tracker | `.it` | libxmp-lite |
 | MP3 (MPEG-1/2/2.5 layer III, CBR / VBR) | `.mp3` | minimp3 |
 | MIDI (Standard MIDI File type 0 / 1, RIFF RMID, karaoke) | `.mid`, `.midi`, `.kar`, `.rmi` | TinySoundFont, with a SoundFont (`.sf2`) |
+| WAV (PCM 8 / 16 / 24 / 32 bit, float, IMA / MS ADPCM, A-law / µ-law) | `.wav`, `.wave` | dr_wav |
+| FLAC (up to 24 bit / 192 kHz) | `.flac` | dr_flac |
+| Ogg Vorbis | `.ogg`, `.oga` | stb_vorbis |
+| NES (NSF, NSFE; VRC6, VRC7, FDS, MMC5, Namco 163, Sunsoft 5B) | `.nsf`, `.nsfe` | Game_Music_Emu |
+| Game Boy | `.gbs` | Game_Music_Emu |
+| Super Nintendo (SPC700) | `.spc` | Game_Music_Emu |
+| Master System / Game Gear / Mega Drive (SN76489, YM2612, YM2413) | `.vgm`, `.vgz` | Game_Music_Emu |
+| ZX Spectrum / Amstrad CPC (AY-3-8910) | `.ay` | Game_Music_Emu |
 
 - A browser of the `/music` folder (and its sub-folders), folders first.
-- A "now playing" screen: title / artist (module name, ID3v1 / ID3v2 tags),
+- A "now playing" screen: title / artist (module name, ID3v1 / ID3v2 tags,
+  Vorbis comments, the names in chiptune files),
   format, time and duration, oscilloscope, VU meter per channel (modules),
   position / row / tempo (modules).
 - Play modes: repeat all, repeat one, shuffle, play once (the files of the
@@ -43,9 +52,23 @@ the first `.sf2` of `/music`. Small ones work best, for example TimGM6mb.sf2
 external flash the first time (a progress bar), then played from there.
 Up to 48 voices at 32 kHz; only the instruments a song uses are set up.
 
+**WAV, FLAC, Ogg Vorbis** are streamed from the SD card, mixed to mono, and
+played at their own rate when the console can (8 to 48 kHz), else halved
+(96 / 88.2 / 192 kHz) or resampled to 48 kHz.
+
+**Chiptunes.** The sound chips of the consoles are emulated (Game_Music_Emu),
+at 32 kHz. An NSF, GBS or AY file often holds a whole soundtrack: left /
+right go through its tracks, then to the other files. A track without a
+known length plays 2:30 then fades out (or stops on silence); a
+`<file>.m3u` next to it (the usual "NEZplug" playlists) gives the names and
+lengths of the tracks. VGZ files are inflated when they are opened; a big
+VGM that does not fit in the RAM is copied to the external flash once.
+
 Not supported: modules packed with an Amiga cruncher, the formats libxmp-lite
 does not read (MED, OctaMED, 669, MTM... and the "FEST" MODs), MP3 files that
-are not layer III.
+are not layer III, AAC / M4A / Opus, and the chiptune formats GYM, HES (PC
+Engine), KSS (MSX), SAP (Atari) and SID (C64), left out to keep the code
+small.
 
 ## Installation
 
@@ -59,8 +82,8 @@ See [INSTALL.md](INSTALL.md) (English and French). In short:
 
 | Game & Watch | Browser | Now playing |
 |---|---|---|
-| Up / Down | Move (held: repeat) | Seek: MP3 ±10 s, modules ±1 position |
-| Left / Right | Page up / down | Previous / next track (previous: restart the track after 3 s) |
+| Up / Down | Move (held: repeat) | Seek: ±10 s (modules: ±1 position) |
+| Left / Right | Page up / down | Previous / next track (previous: restart the track after 3 s); the tracks of a chiptune file first |
 | A | Open the folder / play | Pause / play |
 | B | Parent folder | Back to the browser (the music goes on) |
 | GAME (START on Zelda units) | Now playing screen | Back to the browser |
@@ -107,7 +130,11 @@ The flash cache is emulated (read only once written); `MP_FORCE_FLASH=1`,
 | `src/app/mp_core.c` | The player: browser, now playing screen, playlist, settings, savestates. |
 | `src/midi/` | TinySoundFont (schellingb/TinySoundFont @ 853a0a1). Game & Watch changes under `#ifdef TSF_GNW`: 16-bit samples read in place from the flash, only the presets a song uses, float filter, fixed-point sample position. |
 | `src/app/mp_midi.c` | The MIDI sequencer (SMF type 0 / 1, tempo, seeking). |
-| `src/app/mp_player.c` | The decoders behind one API: modules (with the flash cache of the big ones), MP3 (ID3 tags, VBR, resampling). |
+| `src/codecs/` | dr_wav, dr_flac (mackron/dr_libs @ dfe8377), stb_vorbis (nothings/stb @ 2c980bb; Game & Watch change under `#ifdef STB_VORBIS_GNW`: the per-frame temporary memory on the heap instead of the stack), tinfl of miniz (richgel999/miniz @ 2948eeb, for VGZ). |
+| `src/gme/` | Game_Music_Emu (libgme/game-music-emu @ f68963b), NSF / NSFE / GBS / SPC / VGM / AY only. Game & Watch changes under `#ifdef GME_GNW`: files played in place (no copy), the YM2413 table on the heap and in bytes. |
+| `src/app/mp_pcm.c` | WAV, FLAC, Ogg Vorbis: streaming, mono mix, rate. |
+| `src/app/mp_gme.c` | Chiptunes: tracks, lengths and fades. |
+| `src/app/mp_player.c` | The decoders behind one API: modules (with the flash cache of the big ones), MP3 (ID3 tags, VBR, resampling), the loading of chiptune files (gzip, flash). |
 | `src/app/mp_draw.c`, `mp_font.c` | Drawing: 8 bit canvas, 8x8 font (Latin-1), icons. |
 | `src/app/mp_alloc.c` | The heap: a boundary-tag allocator over several memory regions. |
 | `src/app/mp_main.c`, `mp_libc.c` | Retro-Go side: entry point, display (LUT8), audio, buttons, pause menu, flash cache; the libc functions the firmware does not export. |
@@ -118,6 +145,11 @@ See `CLAUDE.md` for the internals.
 
 ## License
 
-MIT (see `LICENSE`). libxmp is MIT (`src/xmp/LICENSE`), minimp3 is CC0
-(`src/mp3/LICENSE`), TinySoundFont is MIT (`src/midi/LICENSE`), the 8x8 font is public domain, the SDK under `sdk/` is
-MIT (`sdk/LICENSE.MIT`).
+MIT (see `LICENSE`), except Game_Music_Emu (`src/gme/`), which is under the
+GNU LGPL 2.1 (`src/gme/LICENSE`): `MusicPlayer.bin` contains it, and its
+full source (with the changes) is here, so it can be rebuilt with a modified
+version. libxmp is MIT (`src/xmp/LICENSE`), minimp3 is CC0
+(`src/mp3/LICENSE`), TinySoundFont is MIT (`src/midi/LICENSE`), dr_libs,
+stb_vorbis and miniz are public domain / MIT (`src/codecs/`), emu2413 is MIT
+(`src/gme/ext/LICENSE.emu2413`), the 8x8 font is public domain, the SDK under
+`sdk/` is MIT (`sdk/LICENSE.MIT`).

@@ -494,6 +494,11 @@ static void run_input_loop(void)
     }
 }
 
+void mp_plat_watchdog(void)
+{
+    wdog_refresh();
+}
+
 void mp_plat_service(bool idle)
 {
     if (in_service)

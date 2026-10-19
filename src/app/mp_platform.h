@@ -42,6 +42,8 @@ uint32_t mp_plat_time_ms(void);
  * runs the retro-go pause menu when asked. `idle`: nothing to do until the
  * next event (the platform may sleep a little). */
 void mp_plat_service(bool idle);
+/* long work without the main loop (loading a file): keeps the watchdog fed */
+void mp_plat_watchdog(void);
 
 /* Buttons held now (MP_BTN_*). */
 uint32_t mp_plat_buttons(void);

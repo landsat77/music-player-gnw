@@ -7,6 +7,25 @@ section as the GitHub Release notes.
 
 ## [Unreleased]
 
+## [v1.2.0] - 2026-10-19
+
+### Added
+
+- WAV (PCM 8 to 32 bit, float, IMA / MS ADPCM, A-law, µ-law), FLAC and Ogg
+  Vorbis, streamed from the SD card (dr_wav, dr_flac, stb_vorbis); titles
+  and artists from the LIST / Vorbis comment tags.
+- Chiptunes with Game_Music_Emu: NSF / NSFE (NES, with the expansion
+  chips), GBS (Game Boy), SPC (Super Nintendo), VGM / VGZ (Master System,
+  Game Gear, Mega Drive), AY (ZX Spectrum, Amstrad CPC). Left / right go
+  through the tracks of a file; tracks without a length fade out after 2:30;
+  `<file>.m3u` playlists give names and lengths; a big VGM is copied to the
+  external flash once. Savestates keep the track and the position.
+
+### Changed
+
+- The player takes ~180 KB more RAM for its code: big modules go to the
+  external flash a little sooner (files over about 260 KB instead of 400).
+
 ## [v1.1.1] - 2026-10-19
 
 ### Changed

@@ -13,8 +13,10 @@ Requires Retro-Go SD **v2.0.0-rc1 or later** on the Game & Watch.
        /music/Amiga/space_debris.mod
        /music/Albums/My Album/01 - First Song.mp3
 
-   Formats: MOD, S3M, XM, IT (tracker modules), MP3 and MIDI (.mid, .kar,
-   .rmi).
+   Formats: MOD, S3M, XM, IT (tracker modules), MP3, WAV, FLAC, Ogg
+   Vorbis, MIDI (.mid, .kar, .rmi) and the music of game consoles: NSF /
+   NSFE (NES), GBS (Game Boy), SPC (Super Nintendo), VGM / VGZ (Master
+   System, Mega Drive), AY (ZX Spectrum, Amstrad CPC).
 
    For MIDI, also put a SoundFont (`.sf2`) in `/music`, for example
    TimGM6mb.sf2 (6 MB). A `.sf2` with the name of a song, or in its folder,
@@ -49,8 +51,10 @@ Nécessite Retro-Go SD **v2.0.0-rc1 ou plus récent** sur la Game & Watch.
        /music/Amiga/space_debris.mod
        /music/Albums/Mon Album/01 - Premier titre.mp3
 
-   Formats : MOD, S3M, XM, IT (modules de trackers), MP3 et MIDI (.mid,
-   .kar, .rmi).
+   Formats : MOD, S3M, XM, IT (modules de trackers), MP3, WAV, FLAC, Ogg
+   Vorbis, MIDI (.mid, .kar, .rmi) et la musique des consoles de jeu :
+   NSF / NSFE (NES), GBS (Game Boy), SPC (Super Nintendo), VGM / VGZ
+   (Master System, Mega Drive), AY (ZX Spectrum, Amstrad CPC).
 
    Pour le MIDI, mettre aussi une SoundFont (`.sf2`) dans `/music`, par
    exemple TimGM6mb.sf2 (6 Mo). Une `.sf2` au nom d'un morceau, ou dans son
