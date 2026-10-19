@@ -43,9 +43,12 @@ static uint8_t *cv;
 void mp_draw_set_canvas(uint8_t *canvas) { cv = canvas; }
 uint8_t *mp_draw_canvas(void) { return cv; }
 
+/* horizontal clip of the text (scrolling) */
+static int clip_x0 = 0, clip_x1 = MP_WIDTH;
+
 void mp_pset(int x, int y, int c)
 {
-    if ((unsigned)x < MP_WIDTH && (unsigned)y < MP_HEIGHT)
+    if (x >= clip_x0 && x < clip_x1 && (unsigned)x < MP_WIDTH && (unsigned)y < MP_HEIGHT)
         cv[y * MP_WIDTH + x] = (uint8_t)c;
 }
 
@@ -75,6 +78,16 @@ void mp_rect(int x, int y, int w, int h, int c)
 static void glyph(int x, int y, unsigned ch, int c, int scale)
 {
     const uint8_t *g = mp_font8x8[ch & 0xff];
+    if (x + 8 * scale <= clip_x0 || x >= clip_x1)
+        return;
+    if (scale > 1 && (x < clip_x0 || x + 8 * scale > clip_x1)) {
+        /* partly visible: pixel by pixel through the clip */
+        for (int r = 0; r < 8 * scale; r++)
+            for (int b = 0; b < 8 * scale; b++)
+                if (g[r / scale] & (1u << (b / scale)))
+                    mp_pset(x + b, y + r, c);
+        return;
+    }
     for (int r = 0; r < 8; r++) {
         uint8_t bits = g[r];
         if (!bits)
@@ -95,26 +108,107 @@ int mp_text_width(const char *s)
     return (int)strlen(s) * 8;
 }
 
-static int text_scaled(int x, int y, const char *s, int c, int maxw, int scale)
+/* Scrolling texts: one slot per place (x, y, scale) on the screen; its
+ * clock starts again when the text there changes, or when it was not drawn
+ * for a while (back to the same row of the browser). */
+#define SCROLL_SLOTS 12
+#define SCROLL_WAIT_MS 1500  /* still at each end */
+#define SCROLL_FORGET_MS 300 /* not drawn for that long: start again */
+static struct {
+    int16_t x, y;
+    uint8_t scale, used;
+    uint32_t hash, t0, seen;
+} slots[SCROLL_SLOTS];
+static uint32_t draw_now;
+static bool scrolled, scrolled_last;
+
+void mp_draw_begin(uint32_t now_ms)
+{
+    draw_now = now_ms;
+    scrolled_last = scrolled;
+    scrolled = false;
+}
+
+bool mp_draw_scrolling(void) { return scrolled || scrolled_last; }
+
+static uint32_t text_hash(const char *s)
+{
+    uint32_t h = 2166136261u;
+    while (*s)
+        h = (h ^ (unsigned char)*s++) * 16777619u;
+    return h;
+}
+
+/* how far the text is scrolled now (pixels), `over`: what does not fit */
+static int scroll_offset(int x, int y, int scale, const char *s, int over)
+{
+    uint32_t h = text_hash(s);
+    int k = -1, oldest = 0;
+    for (int i = 0; i < SCROLL_SLOTS; i++) {
+        if (slots[i].used && slots[i].x == x && slots[i].y == y && slots[i].scale == scale) {
+            k = i;
+            break;
+        }
+        if (!slots[i].used || slots[i].seen < slots[oldest].seen)
+            oldest = i;
+    }
+    if (k < 0) {
+        k = oldest;
+        slots[k].used = 1;
+        slots[k].x = (int16_t)x;
+        slots[k].y = (int16_t)y;
+        slots[k].scale = (uint8_t)scale;
+        slots[k].hash = h + 1; /* below: a new start */
+    }
+    if (slots[k].hash != h || draw_now - slots[k].seen > SCROLL_FORGET_MS) {
+        slots[k].hash = h;
+        slots[k].t0 = draw_now;
+    }
+    slots[k].seen = draw_now;
+    scrolled = true;
+
+    int speed = 30 * scale; /* pixels per second */
+    uint32_t run = (uint32_t)over * 1000u / (uint32_t)speed;
+    uint32_t cycle = SCROLL_WAIT_MS + run + SCROLL_WAIT_MS;
+    uint32_t t = (draw_now - slots[k].t0) % cycle;
+    if (t < SCROLL_WAIT_MS)
+        return 0;
+    t -= SCROLL_WAIT_MS;
+    if (t >= run)
+        return over;
+    return (int)(t * (uint32_t)speed / 1000u);
+}
+
+static int text_scaled(int x, int y, const char *s, int c, int maxw, int scale, bool scroll)
 {
     int cw = 8 * scale;
     int n = (int)strlen(s);
-    int fit = maxw > 0 ? maxw / cw : n;
-    bool cut = n > fit;
-    int shown = cut ? (fit >= 2 ? fit - 2 : 0) : n;
-    for (int i = 0; i < shown; i++)
-        glyph(x + i * cw, y, (unsigned char)s[i], c, scale);
-    x += shown * cw;
-    if (cut && fit >= 2) {
-        glyph(x, y, '.', c, scale);
-        glyph(x + cw, y, '.', c, scale);
-        x += 2 * cw;
+    int w = n * cw;
+    if (maxw <= 0 || w <= maxw) {
+        for (int i = 0; i < n; i++)
+            glyph(x + i * cw, y, (unsigned char)s[i], c, scale);
+        return x + w;
     }
-    return x;
+    /* too long: cut at maxw, scrolled from right to left */
+    int off = scroll ? scroll_offset(x, y, scale, s, w - maxw) : 0;
+    int x0 = clip_x0, x1 = clip_x1;
+    clip_x0 = x > x0 ? x : x0;
+    clip_x1 = x + maxw < x1 ? x + maxw : x1;
+    int first = off / cw;
+    for (int i = first; i < n; i++) {
+        int gx = x - off + i * cw;
+        if (gx >= clip_x1)
+            break;
+        glyph(gx, y, (unsigned char)s[i], c, scale);
+    }
+    clip_x0 = x0;
+    clip_x1 = x1;
+    return x + maxw;
 }
 
-int mp_text(int x, int y, const char *s, int c, int maxw) { return text_scaled(x, y, s, c, maxw, 1); }
-int mp_text2(int x, int y, const char *s, int c, int maxw) { return text_scaled(x, y, s, c, maxw, 2); }
+int mp_text(int x, int y, const char *s, int c, int maxw) { return text_scaled(x, y, s, c, maxw, 1, true); }
+int mp_text2(int x, int y, const char *s, int c, int maxw) { return text_scaled(x, y, s, c, maxw, 2, true); }
+int mp_text_cut(int x, int y, const char *s, int c, int maxw) { return text_scaled(x, y, s, c, maxw, 1, false); }
 
 void mp_icon(int x, int y, int icon, int c)
 {

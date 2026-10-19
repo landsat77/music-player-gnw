@@ -130,7 +130,13 @@ Watch Retro-Go SD).
 - v1.0.0 was first written on 18/10/2026 in another session whose sources
   were lost (only the docs survived); this tree was rewritten from those
   docs on 19/10/2026 (same features, same controls).
-- v1.0.1: identical-track sharing (big XM). v1.1.0: MIDI.
+- v1.0.1: identical-track sharing (big XM). v1.1.0: MIDI. v1.1.1: scrolling
+  names (`scroll_offset()` in mp_draw.c: a slot per (x, y, scale), restarted
+  when the text changes or was not drawn for 300 ms; the core redraws every
+  40 ms while `mp_draw_scrolling()`), UTF-8 names → Latin-1
+  (`mp_utf8_to_latin1`; the firmware's FatFs has `FF_LFN_UNICODE 2`). Use
+  `LC_ALL=C.UTF-8` with mtools, else accented names land garbled in the
+  SD image.
 
 ---
 

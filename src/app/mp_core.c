@@ -551,6 +551,13 @@ static int mode_icon(void)
     return icons[mode];
 }
 
+/* x of a centred text (a longer one scrolls from the left) */
+static int center_x(const char *s)
+{
+    int x = (MP_WIDTH - mp_text_width(s)) / 2;
+    return x < 2 ? 2 : x;
+}
+
 static void draw_header(const char *title)
 {
     mp_fill(0, 0, MP_WIDTH, 15, C_PANEL);
@@ -594,11 +601,13 @@ static void draw_browser(void)
     /* the folder, shown from the music root */
     const char *rel = cwd + strlen(mp_plat_music_root());
     char head[PATH_MAX_LEN + 8];
-    snprintf(head, sizeof(head), "%s%s", "/music", rel);
+    char head8[PATH_MAX_LEN + 8];
+    snprintf(head8, sizeof(head8), "%s%s", "/music", rel);
+    mp_utf8_to_latin1(head, head8, (int)sizeof(head));
     draw_header(head);
     if (root_missing || list.count == 0) {
         const char *msg = root_missing ? T(T_NO_FOLDER) : T(T_EMPTY);
-        mp_text((MP_WIDTH - mp_text_width(msg)) / 2, 100, msg, C_DIM, 316);
+        mp_text(center_x(msg), 100, msg, C_DIM, 316);
     }
     if (sel < top)
         top = sel;
@@ -614,11 +623,16 @@ static void draw_browser(void)
             mp_fill(0, y, MP_WIDTH - 6, ROW_H, C_SELECT);
         const entry_t *e = &list.e[i];
         const char *name = ent_name(&list, i);
+        char shown[128];
+        mp_utf8_to_latin1(shown, name, (int)sizeof(shown));
         bool playing = !e->is_dir && mp_player_is_open() && pl_index >= 0 &&
                        !strcmp(pl_dir, cwd) && !strcmp(ent_name(&pl, pl_index), name);
         mp_icon(6, y + 2, e->is_dir ? ICON_FOLDER : (playing ? ICON_PLAY : ICON_NOTE),
                 e->is_dir ? C_YELLOW : (playing ? C_GREEN : C_DIM));
-        mp_text(18, y + 2, name, playing ? C_ACCENT : C_TEXT, MP_WIDTH - 30);
+        if (is_sel)
+            mp_text(18, y + 2, shown, playing ? C_ACCENT : C_TEXT, MP_WIDTH - 30);
+        else
+            mp_text_cut(18, y + 2, shown, playing ? C_ACCENT : C_TEXT, MP_WIDTH - 30);
     }
     /* scroll bar */
     if (list.count > LIST_ROWS) {
@@ -754,6 +768,7 @@ static void present(void)
 
 static void redraw(void)
 {
+    mp_draw_begin(mp_plat_time_ms());
     if (screen == SCR_PLAYING)
         draw_playing();
     else
@@ -778,6 +793,7 @@ bool mp_core_play_path(const char *path)
 
 const uint8_t *mp_core_canvas(const uint32_t **palette, int *ncolors)
 {
+    mp_draw_begin(mp_plat_time_ms());
     if (screen == SCR_PLAYING)
         draw_playing();
     else
@@ -790,11 +806,12 @@ const uint8_t *mp_core_canvas(const uint32_t **palette, int *ncolors)
 /* the copy of the samples of a big module to the flash */
 static void draw_progress(uint32_t done, uint32_t total, int what)
 {
+    mp_draw_begin(mp_plat_time_ms());
     mp_fill(0, 0, MP_WIDTH, MP_HEIGHT, C_BG);
     draw_header(T(T_TITLE));
     const char *a = T(what == 1 ? T_COPY_SF2 : T_COPY), *b = T(T_COPY2);
-    mp_text((MP_WIDTH - mp_text_width(a)) / 2, 90, a, C_TEXT, 316);
-    mp_text((MP_WIDTH - mp_text_width(b)) / 2, 104, b, C_DIM, 316);
+    mp_text(center_x(a), 90, a, C_TEXT, 316);
+    mp_text(center_x(b), 104, b, C_DIM, 316);
     mp_rect(39, 124, MP_WIDTH - 78, 12, C_LINE);
     draw_bar(41, 126, MP_WIDTH - 82, 8, done, total);
     char s[32];
@@ -981,6 +998,8 @@ void mp_core_run(void)
 
         bool live = mp_player_is_open() && !paused;
         uint32_t period = live ? (screen == SCR_PLAYING ? 40 : 250) : 500;
+        if (mp_draw_scrolling())
+            period = 40; /* a long name scrolls */
         if (dirty || now - last_draw_ms >= period || (toast[0] && (int32_t)(now - toast_until) > 0))
             redraw();
     }

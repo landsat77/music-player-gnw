@@ -42,6 +42,8 @@ typedef struct {
 typedef void (*mp_progress_cb)(uint32_t done, uint32_t total, int what);
 
 bool mp_player_is_music(const char *name);
+/* names on the SD card are UTF-8; the font is Latin-1 */
+void mp_utf8_to_latin1(char *dst, const char *src, int size);
 
 int mp_player_open(const char *path, mp_progress_cb progress);
 void mp_player_close(void);

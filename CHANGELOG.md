@@ -7,6 +7,20 @@ section as the GitHub Release notes.
 
 ## [Unreleased]
 
+## [v1.1.1] - 2026-10-19
+
+### Changed
+
+- Names too long for the screen scroll instead of ending with "..": the
+  selected file or folder in the browser, the folder at the top, and the
+  title, artist and format on the "now playing" screen (still for 1.5 s at
+  each end).
+
+### Fixed
+
+- Accented file and folder names (UTF-8 on the SD card) were shown garbled:
+  they are now shown in Latin-1 (é, è, ê, à, ç...).
+
 ## [v1.1.0] - 2026-10-19
 
 ### Added

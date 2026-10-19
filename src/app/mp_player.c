@@ -112,11 +112,40 @@ static const char *base_name(const char *path)
     return s ? s + 1 : path;
 }
 
+void mp_utf8_to_latin1(char *dst, const char *src, int size)
+{
+    const unsigned char *p = (const unsigned char *)src;
+    int o = 0;
+    while (*p && o + 1 < size) {
+        unsigned c = *p;
+        int n = 1;
+        if (c >= 0xC0) {
+            n = c >= 0xF0 ? 4 : (c >= 0xE0 ? 3 : 2);
+            int k = 1;
+            while (k < n && (p[k] & 0xC0) == 0x80)
+                k++;
+            if (k < n) {
+                n = 1; /* not UTF-8: as it is */
+            } else if (n == 2) {
+                c = ((c & 0x1F) << 6) | (p[1] & 0x3F);
+            } else {
+                unsigned u = n == 3 ? ((c & 0x0F) << 12) | ((p[1] & 0x3F) << 6) | (p[2] & 0x3F) : 0x10000;
+                /* a few look-alikes: quotes, dashes, the euro, the ellipsis */
+                c = u == 0x2018 || u == 0x2019 ? '\'' : u == 0x201C || u == 0x201D ? '"' :
+                    u == 0x2013 || u == 0x2014 ? '-' : u == 0x2026 ? '.' : '?';
+            }
+        }
+        dst[o++] = (char)c;
+        p += n;
+    }
+    dst[o] = '\0';
+}
+
 /* the file name without its extension: the title when there is none */
 static void title_from_name(const char *path)
 {
     const char *b = base_name(path);
-    snprintf(info.title, sizeof(info.title), "%s", b);
+    mp_utf8_to_latin1(info.title, b, (int)sizeof(info.title));
     char *dot = strrchr(info.title, '.');
     if (dot && dot != info.title && !istarts(b, "mod."))
         *dot = '\0';

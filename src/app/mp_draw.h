@@ -23,9 +23,15 @@ void mp_hline(int x, int y, int w, int c);
 void mp_vline(int x, int y, int h, int c);
 void mp_rect(int x, int y, int w, int h, int c);
 /* Latin-1 text, 8x8 (scale 2: 16x16); returns the x after the text.
- * maxw > 0: cut to maxw pixels, ending with ".." */
+ * maxw > 0: a longer text is shown in maxw pixels and scrolls (still for
+ * 1.5 s at each end); mp_text_cut() only cuts it. */
 int mp_text(int x, int y, const char *s, int c, int maxw);
 int mp_text2(int x, int y, const char *s, int c, int maxw);
+int mp_text_cut(int x, int y, const char *s, int c, int maxw);
+/* before drawing a frame: the time, for the scrolling texts */
+void mp_draw_begin(uint32_t now_ms);
+/* a text scrolled in this frame or the last one: redraw often */
+bool mp_draw_scrolling(void);
 int mp_text_width(const char *s);
 void mp_icon(int x, int y, int icon, int c);
 void mp_pset(int x, int y, int c);
