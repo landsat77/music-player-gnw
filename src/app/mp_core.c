@@ -80,7 +80,7 @@ typedef struct {
     uint32_t pool_len, pool_cap;
 } dirlist_t;
 
-static uint8_t canvas[MP_WIDTH * MP_HEIGHT];
+static uint8_t *canvas; /* on the heap: in the LCD memory on the console (best fit) */
 static char cwd[PATH_MAX_LEN];
 static dirlist_t list;
 static int sel, top;
@@ -921,6 +921,12 @@ static void playing_input(uint32_t p)
 void mp_core_run(void)
 {
     lang = mp_plat_language() == 1 ? 1 : 0;
+    canvas = mp_malloc(MP_WIDTH * MP_HEIGHT);
+    if (!canvas) {
+        mp_plat_log("mp: no memory for the screen\n");
+        for (;;)
+            mp_plat_service(true);
+    }
     mp_draw_set_canvas(canvas);
     settings_load();
     rng ^= mp_plat_time_ms() * 2654435761u;

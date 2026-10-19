@@ -174,14 +174,15 @@ static void module_info_fill(const char *path)
     trim(info.title);
     if (!info.title[0])
         title_from_name(path);
-    const char *t = mi.mod->type;
-    const char *f = "MOD";
-    if (strstr(t, "S3M") || strstr(t, "Scream"))
-        f = "S3M";
-    else if (strstr(t, "XM") || strstr(t, "FastTracker"))
-        f = "XM";
-    else if (strstr(t, "IT") || strstr(t, "Impulse"))
-        f = "IT";
+    /* the format: the extension (the type string is the tracker's name) */
+    char f[8];
+    const char *e = istarts(base_name(path), "mod.") ? "mod" : ext_of(path);
+    int k = 0;
+    for (; e[k] && k < 7; k++)
+        f[k] = (char)toupper((unsigned char)e[k]);
+    f[k] = '\0';
+    if (!strcmp(f, "NST") || !strcmp(f, "M15"))
+        snprintf(f, sizeof(f), "MOD");
     snprintf(info.format, sizeof(info.format), "%s, %d ch", f, mi.mod->chn);
     snprintf(info.artist, sizeof(info.artist), "%s", mi.mod->type);
     trim(info.artist);
@@ -189,7 +190,6 @@ static void module_info_fill(const char *path)
 
 static int module_start(const char *path)
 {
-    mp_plat_log("mp: module loaded, heap %u\n", (unsigned)mp_heap_used());
     if (xmp_start_player(xmp, MODULE_RATE, XMP_FORMAT_MONO) != 0)
         return MP_ERR_MEMORY;
     /* samples in the flash: read only, the mixer must not write around
