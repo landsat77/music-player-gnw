@@ -1,5 +1,9 @@
 # Music Player for Game & Watch Retro-Go SD
 
+<img width="2880" height="2160" alt="image" src="https://github.com/user-attachments/assets/45f4e71a-b0e0-49a8-a489-5f52a069411f" />
+
+
+
 A music player for the Nintendo Game & Watch (Mario / Zelda) running
 **Retro-Go SD** (v2.0.0-rc1 or later), as a homebrew
 (`/homebrews/MusicPlayer.bin`). It plays the music of the SD card:
