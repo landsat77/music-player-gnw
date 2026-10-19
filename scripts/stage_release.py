@@ -254,8 +254,11 @@ def stage_release(
         encoding="utf-8",
     )
 
-    # GitHub Release assets: install zip + debug zip only (no loose .bin).
-    release_files = [archive_path, debug_archive_path]
+    # GitHub Release assets: the .bin itself (to copy to the SD card), the
+    # install zip, the debug zip.
+    loose_bin = out_dir / packed_name
+    shutil.copy2(bin_path, loose_bin)
+    release_files = [loose_bin, archive_path, debug_archive_path]
     files_path = out_dir / "release-files.txt"
     files_path.write_text(
         "\n".join(p.name for p in release_files) + "\n",

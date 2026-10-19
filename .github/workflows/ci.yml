@@ -12,6 +12,12 @@ on:
   # a release made on github.com (it also makes the tag)
   release:
     types: [published]
+  # republish the files of an existing release (Actions > Build > Run workflow)
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Release tag to (re)publish, e.g. v1.0.1'
+        required: true
 
 # Cancel superseded runs on the same ref (keeps PR feedback fast).
 concurrency:
@@ -19,6 +25,7 @@ concurrency:
   cancel-in-progress: true
 
 env:
+  RELEASE_TAG: ${{ github.event.inputs.tag || github.ref_name }}
   # Keep in sync with Makefile RELEASE_VERSION / firmware DOCKER_IMAGE.
   DOCKER_IMAGE: sylverb/retro-go-sd-builder:v1.5
 
@@ -35,6 +42,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
         with:
+          ref: ${{ github.event.inputs.tag || github.ref }}
           submodules: recursive
           # Full history + tags so `git describe --tags --dirty` works for CORE_VERSION.
           fetch-depth: 0
@@ -75,7 +83,7 @@ jobs:
           if-no-files-found: error
 
   release:
-    if: (github.event_name == 'push' || github.event_name == 'release') && startsWith(github.ref, 'refs/tags/v')
+    if: ((github.event_name == 'push' || github.event_name == 'release') && startsWith(github.ref, 'refs/tags/v')) || github.event_name == 'workflow_dispatch'
     needs: build
     runs-on: ubuntu-latest
     permissions:
@@ -111,7 +119,7 @@ jobs:
             --bin "dist/${PACKED_BIN}" \
             --elf "dist/${TARGET_ELF}" \
             --map "dist/${TARGET_MAP}" \
-            --tag "${GITHUB_REF_NAME}" \
+            --tag "${RELEASE_TAG}" \
             --out release \
             --docker-image "${{ env.DOCKER_IMAGE }}"
 
@@ -120,7 +128,7 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
-          TAG="${GITHUB_REF_NAME}"
+          TAG="${RELEASE_TAG}"
           mapfile -t names < release/release-files.txt
           files=()
           for name in "${names[@]}"; do
