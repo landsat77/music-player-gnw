@@ -27,6 +27,9 @@
 #include <stdio.h>
 #include <string.h>
 #include "xmp.h"
+#ifdef LIBXMP_GNW
+#include "gnw.h"
+#endif
 
 #undef  LIBXMP_EXPORT_VAR
 #if defined(EMSCRIPTEN)

@@ -968,6 +968,41 @@ static int load_it_sample(struct module_data *m, int i, int start,
 				force_sample_length(xxs, xtra, left << 3);
 			}
 
+#ifdef LIBXMP_GNW
+			/* first pass of a big module: no sample data */
+			if (m->smpctl & XMP_SMPCTL_SKIP)
+				return 0;
+			/* big module: streamed to the flash one block at a
+			 * time (mono), or only placed (READ) */
+			if (libxmp_gnw_flash && (~ish.flags & IT_SMP_STEREO)) {
+				int gcvt = cvt | SAMPLE_FLAG_GNW_ITCOMP;
+				if (ish.convert & IT_CVT_DIFF)
+					gcvt |= SAMPLE_FLAG_GNW_IT215;
+				return libxmp_load_sample(m, f, gcvt, xxs, tmpbuf) < 0 ? -1 : 0;
+			}
+			/* in RAM: decompressed straight into the sample's
+			 * block, no second copy (mono) */
+			if (~ish.flags & IT_SMP_STEREO && !libxmp_gnw_flash) {
+				int bytes = (ish.flags & IT_SMP_16BIT) ? xxs->len * 2 : xxs->len;
+				int extra = (ish.flags & IT_SMP_16BIT) ? 8 : 4;
+				uint8 *block = (uint8 *) calloc(1, bytes + extra + 4);
+				int r;
+				if (block == NULL)
+					return -1;
+				if (ish.flags & IT_SMP_16BIT)
+					r = itsex_decompress16(f, (int16 *)(block + 4), xxs->len,
+						tmpbuf, TEMP_BUFFER_LEN, ish.convert & IT_CVT_DIFF);
+				else
+					r = itsex_decompress8(f, block + 4, xxs->len,
+						tmpbuf, TEMP_BUFFER_LEN, ish.convert & IT_CVT_DIFF);
+				(void)r;	/* stock: errors keep what was decoded */
+				ret = libxmp_load_sample(m, NULL, SAMPLE_FLAG_NOLOAD |
+					SAMPLE_FLAG_GNW_ADOPT | cvt, &mod->xxs[i], block + 4);
+				if (mod->xxs[i].data != block + 4)
+					free(block);	/* not taken */
+				return ret < 0 ? -1 : 0;
+			}
+#endif
 			decbuf = unpack_it_sample(xxs, &ish, tmpbuf, f);
 			if (decbuf == NULL)
 				return -1;

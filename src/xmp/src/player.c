@@ -596,6 +596,12 @@ static void update_invloop(struct context_data *ctx, struct channel_data *xc)
 			return;
 		}
 
+#ifdef LIBXMP_GNW
+		/* the samples of the big modules are in the flash: read only */
+		if (libxmp_gnw_flash_owns(xxs->data)) {
+			return;
+		}
+#endif
 		if (~xxs->flg & XMP_SAMPLE_16BIT) {
 			xxs->data[lps + xc->invloop.pos] ^= 0xff;
 		}

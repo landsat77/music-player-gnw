@@ -1071,7 +1071,13 @@ int libxmp_mixer_on(struct context_data *ctx, int rate, int format, int c4rate)
 
 	/* These allocations were made with a fixed framesize based on the rate
 	 * 49170 for a long time, so make that the minimum size for now. */
+#ifdef LIBXMP_GNW
+	/* the console: just what the slowest tempo needs (the stock minimum
+	 * was ~150 KB of buffers) */
+	CLAMP(total_size, 1, XMP_MAX_FRAMESIZE);
+#else
 	CLAMP(total_size, 5 * 49170 * 2 / 20, XMP_MAX_FRAMESIZE);
+#endif
 
 	s->buffer = (char *) calloc(total_size, sample_size);
 	if (s->buffer == NULL)

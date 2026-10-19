@@ -1715,7 +1715,13 @@ int mp3dec_decode_frame(mp3dec_t *dec, const uint8_t *mp3, int mp3_bytes, mp3d_s
     int i = 0, igr, frame_size = 0, success = 1;
     const uint8_t *hdr;
     bs_t bs_frame[1];
+#ifdef MINIMP3_GNW_STATIC_SCRATCH
+    /* Game & Watch: 16 KB, more than half of the 24 KB stack (one decoder
+     * at a time) */
+    static mp3dec_scratch_t scratch;
+#else
     mp3dec_scratch_t scratch;
+#endif
 
     if (mp3_bytes > 4 && dec->header[0] == 0xff && hdr_compare(dec->header, mp3))
     {
