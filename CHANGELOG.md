@@ -7,6 +7,14 @@ section as the GitHub Release notes.
 
 ## [Unreleased]
 
+## [v1.2.1] - 2026-10-19
+
+### Added
+
+- A cover for the launcher's coverflow (pixel-art player, `src/assets/cover.png`,
+  scaled to 133x100 by `scripts/make_cover.py`) instead of the generated
+  title card.
+
 ## [v1.2.0] - 2026-10-19
 
 ### Added

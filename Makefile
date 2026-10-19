@@ -101,22 +101,17 @@ CORE_VERSION ?= $(shell git describe --tags --dirty 2>/dev/null || echo NOTAG)
 # Pack (GWHB)
 #######################################
 PACK_HOMEBREW := $(GNW_CORE_SDK)/tools/pack_homebrew.py
-GEN_COVER     := scripts/gen_homebrew_cover.py
+MAKE_COVER    := scripts/make_cover.py
+COVER_SRC     := src/assets/cover.png
 COVER_JPG     := $(BUILD_DIR)/cover.jpg
-COVER_WIDTH   ?= 128
-COVER_HEIGHT  ?= 96
 
 .PHONY: pack cover
 cover: $(COVER_JPG)
 
-# Must stay <= 186x100 and <= 10 KiB (firmware cover cache).
-$(COVER_JPG): $(GEN_COVER) | $(BUILD_DIR)
-	$(V)$(ECHO) "[ COVER ] $(COVER_JPG) $(COVER_WIDTH)x$(COVER_HEIGHT)"
-	$(V)python3 $(GEN_COVER) \
-		--out $(COVER_JPG) \
-		--title "$(HB_NAME)" \
-		--width $(COVER_WIDTH) \
-		--height $(COVER_HEIGHT)
+# The cover art (src/assets/cover.png, 320x240), scaled to 133x100. Must stay <= 186x100 and <= 10 KiB (firmware cover cache).
+$(COVER_JPG): $(MAKE_COVER) $(COVER_SRC) | $(BUILD_DIR)
+	$(V)$(ECHO) "[ COVER ] $(COVER_JPG)"
+	$(V)python3 $(MAKE_COVER) --in $(COVER_SRC) --out $(COVER_JPG)
 
 pack: $(TARGET_BIN) $(COVER_JPG)
 	$(V)$(ECHO) [ PACK GWHB ] $(PACKED_BIN) version=$(CORE_VERSION)
