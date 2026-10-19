@@ -73,6 +73,14 @@ TSFDEF tsf* tsf_load_filename(const char* filename);
 // Load a SoundFont from a block of memory
 TSFDEF tsf* tsf_load_memory(const void* buffer, int size);
 
+#ifdef TSF_GNW
+// Game & Watch: load a SoundFont in memory that stays there (the samples
+// are used in place, 16 bit). `want(arg, bank, preset)`: load the regions
+// of this preset (others: no regions, they play nothing); NULL: all.
+TSFDEF tsf* tsf_load_memory_inplace(const void* buffer, int size,
+	int (*want)(void* arg, int bank, int preset), void* want_arg);
+#endif
+
 // Stream structure for the generic loading
 struct tsf_stream
 {
@@ -327,10 +335,20 @@ typedef char tsf_char20[20];
 
 #define TSF_FourCCEquals(value1, value2) (value1[0] == value2[0] && value1[1] == value2[1] && value1[2] == value2[2] && value1[3] == value2[3])
 
+#ifdef TSF_GNW
+/* Game & Watch: the 16 bit samples of the SoundFont are used in place
+ * (memory mapped flash), not converted to floats in RAM */
+typedef const short tsf_sample_t;
+#define TSF_SAMPLE_SCALE (1.0f / 32767.0f)
+#else
+typedef float tsf_sample_t;
+#define TSF_SAMPLE_SCALE 1.0f
+#endif
+
 struct tsf
 {
 	struct tsf_preset* presets;
-	float* fontSamples;
+	tsf_sample_t* fontSamples;
 	struct tsf_voice* voices;
 	struct tsf_channels* channels;
 
@@ -370,8 +388,33 @@ TSFDEF tsf* tsf_load_filename(const char* filename)
 #endif
 
 struct tsf_stream_memory { const char* buffer; unsigned int total, pos; };
+#ifdef TSF_GNW
+static struct tsf_stream_memory* tsf_gnw_mem;	/* in-place load (one at a time) */
+static int (*tsf_gnw_want)(void* arg, int bank, int preset);
+static void* tsf_gnw_want_arg;
+#endif
 static int tsf_stream_memory_read(struct tsf_stream_memory* m, void* ptr, unsigned int size) { if (size > m->total - m->pos) size = m->total - m->pos; TSF_MEMCPY(ptr, m->buffer+m->pos, size); m->pos += size; return size; }
 static int tsf_stream_memory_skip(struct tsf_stream_memory* m, unsigned int count) { if (m->pos + count > m->total) return 0; m->pos += count; return 1; }
+#ifdef TSF_GNW
+TSFDEF tsf* tsf_load_memory_inplace(const void* buffer, int size,
+	int (*want)(void* arg, int bank, int preset), void* want_arg)
+{
+	struct tsf_stream stream = { TSF_NULL, (int(*)(void*,void*,unsigned int))&tsf_stream_memory_read, (int(*)(void*,unsigned int))&tsf_stream_memory_skip };
+	struct tsf_stream_memory f = { 0, 0, 0 };
+	tsf* res;
+	f.buffer = (const char*)buffer;
+	f.total = size;
+	stream.data = &f;
+	tsf_gnw_mem = &f;
+	tsf_gnw_want = want;
+	tsf_gnw_want_arg = want_arg;
+	res = tsf_load(&stream);
+	tsf_gnw_mem = TSF_NULL;
+	tsf_gnw_want = TSF_NULL;
+	return res;
+}
+#endif
+
 TSFDEF tsf* tsf_load_memory(const void* buffer, int size)
 {
 	struct tsf_stream stream = { TSF_NULL, (int(*)(void*,void*,unsigned int))&tsf_stream_memory_read, (int(*)(void*,unsigned int))&tsf_stream_memory_skip };
@@ -420,7 +463,12 @@ static void tsf_hydra_read_shdr(struct tsf_hydra_shdr* i, struct tsf_stream* str
 struct tsf_riffchunk { tsf_fourcc id; tsf_u32 size; };
 struct tsf_envelope { float delay, attack, hold, decay, sustain, release, keynumToHold, keynumToDecay; };
 struct tsf_voice_envelope { unsigned char segment, segmentIsExponential : 1, isAmpEnv : 1; short midiVelocity; float level, slope; int samplesUntilNextSegment; struct tsf_envelope parameters; };
+#ifdef TSF_GNW
+/* single precision: the Cortex-M7 FPU does it in one cycle */
+struct tsf_voice_lowpass { float QInv, a0, a1, b1, b2, z1, z2; TSF_BOOL active; };
+#else
 struct tsf_voice_lowpass { double QInv, a0, a1, b1, b2, z1, z2; TSF_BOOL active; };
+#endif
 struct tsf_voice_lfo { int samplesUntil; float level, delta; };
 
 struct tsf_region
@@ -736,6 +784,11 @@ static int tsf_load_presets(tsf* res, struct tsf_hydra *hydra, unsigned int font
 		preset->bank = pphdr->bank;
 		preset->preset = pphdr->preset;
 		preset->regionNum = 0;
+#ifdef TSF_GNW
+		/* only the presets the song uses: their regions take RAM */
+		if (tsf_gnw_want && !tsf_gnw_want(tsf_gnw_want_arg, pphdr->bank, pphdr->preset))
+			continue;
+#endif
 
 		//count regions covered by this preset
 		for (ppbag = hydra->pbags + pphdr->presetBagNdx, ppbagEnd = hydra->pbags + pphdr[1].presetBagNdx; ppbag != ppbagEnd; ppbag++)
@@ -1152,10 +1205,17 @@ static void tsf_voice_lowpass_setup(struct tsf_voice_lowpass* e, float Fc)
 	e->b2 = (1 - K * e->QInv + KK) * norm;
 }
 
+#ifdef TSF_GNW
+static float tsf_voice_lowpass_process(struct tsf_voice_lowpass* e, float In)
+{
+	float Out = In * e->a0 + e->z1; e->z1 = In * e->a1 + e->z2 - e->b1 * Out; e->z2 = In * e->a0 - e->b2 * Out; return Out;
+}
+#else
 static float tsf_voice_lowpass_process(struct tsf_voice_lowpass* e, double In)
 {
 	double Out = In * e->a0 + e->z1; e->z1 = In * e->a1 + e->z2 - e->b1 * Out; e->z2 = In * e->a0 - e->b2 * Out; return (float)Out;
 }
+#endif
 
 static void tsf_voice_lfo_setup(struct tsf_voice_lfo* e, float delay, int freqCents, float outSampleRate)
 {
@@ -1220,7 +1280,7 @@ static void tsf_voice_calcpitchratio(struct tsf_voice* v, float pitchShift, floa
 static void tsf_voice_render(tsf* f, struct tsf_voice* v, float* outputBuffer, int numSamples)
 {
 	struct tsf_region* region = v->region;
-	float* input = f->fontSamples;
+	tsf_sample_t* input = f->fontSamples;
 	float* outL = outputBuffer;
 	float* outR = (f->outputmode == TSF_STEREO_UNWEAVED ? outL + numSamples : TSF_NULL);
 
@@ -1273,7 +1333,7 @@ static void tsf_voice_render(tsf* f, struct tsf_voice* v, float* outputBuffer, i
 		if (dynamicGain)
 			noteGain = tsf_decibelsToGain(v->noteGainDB + (v->modlfo.level * tmpModLfoToVolume));
 
-		gainMono = noteGain * v->ampenv.level;
+		gainMono = noteGain * v->ampenv.level * TSF_SAMPLE_SCALE;
 
 		// Update EG.
 		tsf_voice_envelope_process(&v->ampenv, blockSamples, tmpSampleRate);
@@ -1328,6 +1388,30 @@ static void tsf_voice_render(tsf* f, struct tsf_voice* v, float* outputBuffer, i
 				break;
 
 			case TSF_MONO:
+				#ifdef TSF_GNW
+				{
+					/* Game & Watch: the position in 32.32 fixed point (the
+					 * double precision steps cost too much on the Cortex-M7) */
+					const double one = 4294967296.0;
+					unsigned long long fpos = (unsigned long long)(tmpSourceSamplePosition * one);
+					unsigned long long fstep = (unsigned long long)(pitchRatio * one);
+					unsigned long long fend = (unsigned long long)(tmpSampleEndDbl * one);
+					unsigned long long floopEnd = ((unsigned long long)tmpLoopEnd + 1) << 32;
+					unsigned long long floopLen = ((unsigned long long)(tmpLoopEnd - tmpLoopStart) + 1) << 32;
+					while (blockSamples-- && fpos < fend)
+					{
+						unsigned int pos = (unsigned int)(fpos >> 32), nextPos = (pos >= tmpLoopEnd && isLooping ? tmpLoopStart : pos + 1);
+						float alpha = (float)((unsigned int)fpos >> 8) * (1.0f / 16777216.0f);
+						float s0 = (float)input[pos], val = s0 + ((float)input[nextPos] - s0) * alpha;
+						if (tmpLowpass.active) val = tsf_voice_lowpass_process(&tmpLowpass, val);
+						*outL++ += val * gainMono;
+						fpos += fstep;
+						if (fpos >= floopEnd && isLooping) fpos -= floopLen;
+					}
+					tmpSourceSamplePosition = (double)fpos / one;
+				}
+				break;
+				#endif
 				while (blockSamples-- && tmpSourceSamplePosition < tmpSampleEndDbl)
 				{
 					unsigned int pos = (unsigned int)tmpSourceSamplePosition, nextPos = (pos >= tmpLoopEnd && isLooping ? tmpLoopStart : pos + 1);
@@ -1408,6 +1492,16 @@ TSFDEF tsf* tsf_load(struct tsf_stream* stream)
 		{
 			while (tsf_riffchunk_read(&chunkList, &chunk, stream))
 			{
+				#ifdef TSF_GNW
+				if (tsf_gnw_mem && TSF_FourCCEquals(chunk.id, "smpl") && !rawBuffer && chunk.size >= sizeof(short))
+				{
+					/* in place: the 16 bit samples where they are */
+					rawBuffer = (void*)(tsf_gnw_mem->buffer + tsf_gnw_mem->pos);
+					smplCount = chunk.size / (unsigned int)sizeof(short);
+					stream->skip(stream->data, chunk.size);
+				}
+				else
+				#endif
 				if ((TSF_FourCCEquals(chunk.id, "smpl")
 						#ifdef STB_VORBIS_INCLUDE_STB_VORBIS_H
 						|| TSF_FourCCEquals(chunk.id, "smpo")
@@ -1438,8 +1532,15 @@ TSFDEF tsf* tsf_load(struct tsf_stream* stream)
 		if (res) TSF_MEMSET(res, 0, sizeof(tsf));
 		if (!res || !tsf_load_presets(res, &hydra, smplCount)) goto out_of_memory;
 		res->outSampleRate = 44100.0f;
+		#ifdef TSF_GNW
+		/* only tsf_load_memory_inplace(): the 16 bit samples in place */
+		if (!tsf_gnw_mem) goto out_of_memory;
+		res->fontSamples = (tsf_sample_t*)rawBuffer;
+		rawBuffer = TSF_NULL; // in place: not ours
+		#else
 		res->fontSamples = floatBuffer;
 		floatBuffer = TSF_NULL; // don't free below
+		#endif
 	}
 	if (0)
 	{
@@ -1451,6 +1552,9 @@ TSFDEF tsf* tsf_load(struct tsf_stream* stream)
 	TSF_FREE(hydra.phdrs); TSF_FREE(hydra.pbags); TSF_FREE(hydra.pmods);
 	TSF_FREE(hydra.pgens); TSF_FREE(hydra.insts); TSF_FREE(hydra.ibags);
 	TSF_FREE(hydra.imods); TSF_FREE(hydra.igens); TSF_FREE(hydra.shdrs);
+	#ifdef TSF_GNW
+	if (tsf_gnw_mem) rawBuffer = TSF_NULL; // in place: not ours
+	#endif
 	TSF_FREE(rawBuffer);   TSF_FREE(floatBuffer);
 	return res;
 }
@@ -1483,7 +1587,12 @@ TSFDEF void tsf_close(tsf* f)
 		struct tsf_preset *preset = f->presets, *presetEnd = preset + f->presetNum;
 		for (; preset != presetEnd; preset++) TSF_FREE(preset->regions);
 		TSF_FREE(f->presets);
-		TSF_FREE(f->fontSamples);
+		#ifdef TSF_GNW
+		/* in place (the caller's memory): the heap's free() ignores
+		 * pointers outside it, but say it */
+		f->fontSamples = TSF_NULL;
+		#endif
+		TSF_FREE((void*)f->fontSamples);
 		TSF_FREE(f->refCount);
 	}
 	TSF_FREE(f->channels);

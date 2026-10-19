@@ -7,6 +7,18 @@ section as the GitHub Release notes.
 
 ## [Unreleased]
 
+## [v1.1.0] - 2026-10-19
+
+### Added
+
+- MIDI files (`.mid`, `.midi`, `.kar`, `.rmi`; SMF type 0 and 1) played with
+  TinySoundFont and a SoundFont (`.sf2`) from the SD card: `<song>.sf2`, else
+  the first `.sf2` of the folder, else of `/music`. The SoundFont is copied
+  to the external flash once (progress bar) and read from there; only the
+  instruments a song uses are set up. 32 kHz, up to 48 voices, seeking,
+  savestates, track name / copyright shown, voices and tempo on screen.
+- A message when a MIDI file has no SoundFont.
+
 ## [v1.0.1] - 2026-10-19
 
 ### Fixed

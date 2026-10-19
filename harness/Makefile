@@ -15,7 +15,7 @@ MP3 = ../src/mp3
 include ../src/xmp/sources.mk
 
 XMP_SOURCES = $(addprefix $(XMP)/,$(XMP_FILES))
-APP_FILES = mp_core.c mp_player.c mp_draw.c mp_font.c mp_alloc.c
+APP_FILES = mp_core.c mp_player.c mp_midi.c mp_draw.c mp_font.c mp_alloc.c
 
 SAN ?= 0
 OPT ?= -O2 -g
@@ -25,7 +25,7 @@ LDFLAGS += -fsanitize=address,undefined
 endif
 
 DEFS = -DMP_HOST -DLIBXMP_GNW -DLIBXMP_CORE_PLAYER -DLIBXMP_STATIC
-INCLUDES = -I$(APP) -I$(XMP)/include -I$(XMP)/src -I$(MP3)
+INCLUDES = -I$(APP) -I$(XMP)/include -I$(XMP)/src -I$(MP3) -I../src/midi
 WARN = -Wall -Wno-unused-function -Wno-sign-compare
 CFLAGS = $(OPT) -MMD -std=gnu11 $(DEFS) $(WARN) $(INCLUDES)
 

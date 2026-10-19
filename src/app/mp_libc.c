@@ -52,3 +52,52 @@ int stat(const char *path, struct stat *st)
     st->st_size = (off_t)s.size;
     return 0;
 }
+
+/* TinySoundFont (MIDI): envelopes, volumes, the low-pass filter */
+double pow(double x, double y);
+
+float powf(float x, float y)
+{
+    return (float)pow(x, y);
+}
+
+float expf(float x)
+{
+    return (float)pow(2.71828182845904523536, x);
+}
+
+static double sin_small(double x) /* |x| <= pi/2 */
+{
+    double x2 = x * x, term = x, sum = x;
+    for (int n = 1; n < 12; n++) {
+        term *= -x2 / (double)((2 * n) * (2 * n + 1));
+        sum += term;
+    }
+    return sum;
+}
+
+static double cos_small(double x) /* |x| <= pi/2 */
+{
+    double x2 = x * x, term = 1.0, sum = 1.0;
+    for (int n = 1; n < 12; n++) {
+        term *= -x2 / (double)((2 * n - 1) * (2 * n));
+        sum += term;
+    }
+    return sum;
+}
+
+/* the filter asks tan(pi * Fc), Fc < 0.5: 0 <= x < pi/2 */
+double tan(double x)
+{
+    const double half_pi = 1.57079632679489661923;
+    double sign = 1;
+    if (x < 0) {
+        x = -x;
+        sign = -1;
+    }
+    while (x > half_pi * 2) /* period pi */
+        x -= half_pi * 2;
+    if (x > half_pi)        /* tan(x) = -tan(pi - x) */
+        return -sign * sin_small(half_pi * 2 - x) / cos_small(half_pi * 2 - x);
+    return sign * sin_small(x) / cos_small(x);
+}

@@ -11,6 +11,7 @@ A music player for the Nintendo Game & Watch (Mario / Zelda) running
 | FastTracker 2 | `.xm` | libxmp-lite |
 | Impulse Tracker | `.it` | libxmp-lite |
 | MP3 (MPEG-1/2/2.5 layer III, CBR / VBR) | `.mp3` | minimp3 |
+| MIDI (Standard MIDI File type 0 / 1, RIFF RMID, karaoke) | `.mid`, `.midi`, `.kar`, `.rmi` | TinySoundFont, with a SoundFont (`.sf2`) |
 
 - A browser of the `/music` folder (and its sub-folders), folders first.
 - A "now playing" screen: title / artist (module name, ID3v1 / ID3v2 tags),
@@ -30,6 +31,13 @@ flash the first time it is played (a progress bar is shown, a few seconds per
 MB); later plays find them there and start at once. These modules play
 without interpolation (the samples in the flash are read only). MP3 files of
 any size are streamed from the SD card.
+
+**MIDI.** MIDI files need a General MIDI SoundFont (`.sf2`) on the SD card:
+`<song name>.sf2` next to the song, else the first `.sf2` of its folder, else
+the first `.sf2` of `/music`. Small ones work best, for example TimGM6mb.sf2
+(6 MB, GPL-2) or GeneralUser GS (30 MB). The SoundFont is copied to the
+external flash the first time (a progress bar), then played from there.
+Up to 48 voices at 32 kHz; only the instruments a song uses are set up.
 
 Not supported: modules packed with an Amiga cruncher, the formats libxmp-lite
 does not read (MED, OctaMED, 669, MTM... and the "FEST" MODs), MP3 files that
@@ -93,6 +101,8 @@ The flash cache is emulated (read only once written); `MP_FORCE_FLASH=1`,
 | `src/xmp/` | libxmp-lite (libxmp/libxmp @ 5d4f6aa): MOD, S3M, XM, IT. Game & Watch changes are under `#ifdef LIBXMP_GNW`. |
 | `src/mp3/` | minimp3 (lieff/minimp3 @ ea99364). Its 16 KB scratch is static on the console (`MINIMP3_GNW_STATIC_SCRATCH`). |
 | `src/app/mp_core.c` | The player: browser, now playing screen, playlist, settings, savestates. |
+| `src/midi/` | TinySoundFont (schellingb/TinySoundFont @ 853a0a1). Game & Watch changes under `#ifdef TSF_GNW`: 16-bit samples read in place from the flash, only the presets a song uses, float filter, fixed-point sample position. |
+| `src/app/mp_midi.c` | The MIDI sequencer (SMF type 0 / 1, tempo, seeking). |
 | `src/app/mp_player.c` | The decoders behind one API: modules (with the flash cache of the big ones), MP3 (ID3 tags, VBR, resampling). |
 | `src/app/mp_draw.c`, `mp_font.c` | Drawing: 8 bit canvas, 8x8 font (Latin-1), icons. |
 | `src/app/mp_alloc.c` | The heap: a boundary-tag allocator over several memory regions. |
@@ -105,5 +115,5 @@ See `CLAUDE.md` for the internals.
 ## License
 
 MIT (see `LICENSE`). libxmp is MIT (`src/xmp/LICENSE`), minimp3 is CC0
-(`src/mp3/LICENSE`), the 8x8 font is public domain, the SDK under `sdk/` is
+(`src/mp3/LICENSE`), TinySoundFont is MIT (`src/midi/LICENSE`), the 8x8 font is public domain, the SDK under `sdk/` is
 MIT (`sdk/LICENSE.MIT`).

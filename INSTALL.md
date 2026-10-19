@@ -13,7 +13,12 @@ Requires Retro-Go SD **v2.0.0-rc1 or later** on the Game & Watch.
        /music/Amiga/space_debris.mod
        /music/Albums/My Album/01 - First Song.mp3
 
-   Formats: MOD, S3M, XM, IT (tracker modules) and MP3.
+   Formats: MOD, S3M, XM, IT (tracker modules), MP3 and MIDI (.mid, .kar,
+   .rmi).
+
+   For MIDI, also put a SoundFont (`.sf2`) in `/music`, for example
+   TimGM6mb.sf2 (6 MB). A `.sf2` with the name of a song, or in its folder,
+   is used first. It is copied to the external flash the first time.
 
 3. Start "Music Player" from the Homebrew tab.
 
@@ -44,7 +49,13 @@ Nécessite Retro-Go SD **v2.0.0-rc1 ou plus récent** sur la Game & Watch.
        /music/Amiga/space_debris.mod
        /music/Albums/Mon Album/01 - Premier titre.mp3
 
-   Formats : MOD, S3M, XM, IT (modules de trackers) et MP3.
+   Formats : MOD, S3M, XM, IT (modules de trackers), MP3 et MIDI (.mid,
+   .kar, .rmi).
+
+   Pour le MIDI, mettre aussi une SoundFont (`.sf2`) dans `/music`, par
+   exemple TimGM6mb.sf2 (6 Mo). Une `.sf2` au nom d'un morceau, ou dans son
+   dossier, passe en premier. Elle est copiée dans la flash externe la
+   première fois.
 
 3. Lancer « Music Player » depuis l'onglet Homebrew.
 

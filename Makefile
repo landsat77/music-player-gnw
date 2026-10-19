@@ -33,13 +33,14 @@ XMP_C_SOURCES := $(addprefix $(XMP_DIR)/,$(XMP_FILES))
 CORE_C_SOURCES := $(XMP_C_SOURCES) \
 $(APP_DIR)/mp_core.c \
 $(APP_DIR)/mp_player.c \
+$(APP_DIR)/mp_midi.c \
 $(APP_DIR)/mp_draw.c \
 $(APP_DIR)/mp_font.c \
 $(APP_DIR)/mp_alloc.c \
 $(APP_DIR)/mp_libc.c \
 $(APP_DIR)/mp_main.c
 
-CORE_C_INCLUDES := -I$(APP_DIR) -I$(XMP_DIR)/include -I$(XMP_DIR)/src -I$(MP3_DIR)
+CORE_C_INCLUDES := -I$(APP_DIR) -I$(XMP_DIR)/include -I$(XMP_DIR)/src -I$(MP3_DIR) -Isrc/midi
 
 CORE_C_DEFS := -DPROJECT_KIND_HOMEBREW=1 -DLIBXMP_GNW -DLIBXMP_CORE_PLAYER -DLIBXMP_STATIC
 

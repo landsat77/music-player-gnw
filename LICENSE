@@ -25,5 +25,6 @@ SOFTWARE.
 Third-party code in this repository keeps its own license:
 - src/xmp/   libxmp-lite, MIT (src/xmp/LICENSE)
 - src/mp3/   minimp3, CC0 (src/mp3/LICENSE)
+- src/midi/  TinySoundFont, MIT (src/midi/LICENSE)
 - src/app/mp_font.c   font8x8 by Daniel Hepper, public domain
 - sdk/       Retro-Go SD core / homebrew SDK, MIT (sdk/LICENSE.MIT)

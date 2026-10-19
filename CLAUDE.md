@@ -96,6 +96,23 @@ Watch Retro-Go SD).
   for the READ path) against `MP_NEAREST=1` in RAM: the WAVs must be
   identical.
 
+## MIDI (`mp_midi.c`, `src/midi/tsf.h` with `TSF_GNW`)
+
+- The SoundFont is found by `find_sf2` (`<name>.sf2`, the folder, `/music`)
+  and copied once to the flash blob store (`map_sf2`, key
+  `sf2|crc|size|name`, progress `what = 1`); TSF then reads the mapped
+  flash in place (`tsf_load_memory_inplace`): the `smpl` chunk is used as
+  16-bit samples (`TSF_SAMPLE_SCALE` in the gain), nothing is copied.
+- A scan pass of the SMF lists the (bank, program) pairs of melodic
+  channels and the drum kits; presets not wanted get 0 regions (the RAM of
+  TimGM6mb with all presets would be ~1 MB). Heap: ~318 KB peak at load,
+  ~123 KB playing.
+- CPU (gwemu, 35 voices): double steps ~50% idle; float lowpass + 32.32
+  fixed-point sample position in the mono loop: 66-85% idle. Mono output
+  only (TSF_MONO). `MP_MIDI_RATE 32000`, `MAX_VOICES 48`.
+- Seeking replays CC / program / tempo events from the start without notes.
+- TSF needs `powf`, `expf`, `tan`: in `mp_libc.c`.
+
 ## Known limits
 
 - Stock libxmp-lite fails on some files (e.g. RetrigSlide.s3m from the
@@ -113,6 +130,7 @@ Watch Retro-Go SD).
 - v1.0.0 was first written on 18/10/2026 in another session whose sources
   were lost (only the docs survived); this tree was rewritten from those
   docs on 19/10/2026 (same features, same controls).
+- v1.0.1: identical-track sharing (big XM). v1.1.0: MIDI.
 
 ---
 

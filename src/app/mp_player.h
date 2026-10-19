@@ -15,9 +15,10 @@ enum {
     MP_ERR_FORMAT = -2,   /* not a file the player knows */
     MP_ERR_MEMORY = -3,   /* too big */
     MP_ERR_FLASH = -4,    /* no room in the flash for its samples */
+    MP_ERR_NO_SF2 = -5,   /* a MIDI file without a SoundFont */
 };
 
-enum { MP_KIND_NONE, MP_KIND_MODULE, MP_KIND_MP3 };
+enum { MP_KIND_NONE, MP_KIND_MODULE, MP_KIND_MP3, MP_KIND_MIDI };
 
 typedef struct {
     int kind;
@@ -32,10 +33,13 @@ typedef struct {
     int pos, npos, row, nrows, speed, bpm;
     int nch;
     uint8_t vu[32];       /* 0..64 per channel (the first 32) */
+    bool midi;            /* MIDI: voices and bpm (no pos / row / speed) */
+    int voices;
 } mp_module_status_t;
 
-/* progress of the copy of the samples to the flash (done / total bytes) */
-typedef void (*mp_progress_cb)(uint32_t done, uint32_t total);
+/* progress of a copy to the flash (done / total bytes): what = 0 the
+ * samples of a module, 1 a SoundFont */
+typedef void (*mp_progress_cb)(uint32_t done, uint32_t total, int what);
 
 bool mp_player_is_music(const char *name);
 

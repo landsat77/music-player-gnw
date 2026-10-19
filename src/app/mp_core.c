@@ -37,6 +37,7 @@ enum {
     T_MODE_ALL, T_MODE_ONE, T_MODE_SHUFFLE, T_MODE_ONCE,
     T_ERR_FILE, T_ERR_FORMAT, T_ERR_MEMORY, T_ERR_FLASH,
     T_COPY, T_COPY2, T_POS, T_ROW, T_TEMPO, T_NOTHING, T_HELP_BROWSER, T_HELP_PLAYING,
+    T_ERR_NO_SF2, T_COPY_SF2, T_VOICES,
     T_COUNT
 };
 static const char *const texts[2][T_COUNT] = {
@@ -49,6 +50,7 @@ static const char *const texts[2][T_COUNT] = {
         "Nothing playing",
         "A:open B:back GAME:playing TIME:mode",
         "A:pause  </>:track  ^v:seek  B:back",
+        "No SoundFont (.sf2) in /music", "Copying the SoundFont to the flash", "Voices",
     },
     {
         "Music Player", "Lecture en cours", "Pas de musique ici", "Pas de dossier /music sur la carte SD",
@@ -59,6 +61,7 @@ static const char *const texts[2][T_COUNT] = {
         "Rien en lecture",
         "A:ouvrir B:retour GAME:lecture TIME:mode",
         "A:pause </>:piste ^v:avance B:retour",
+        "Pas de SoundFont (.sf2) dans /music", "Copie de la SoundFont en flash", "Voix",
     },
 };
 static int lang;
@@ -296,7 +299,7 @@ static void show_toast(const char *msg)
     dirty = true;
 }
 
-static void draw_progress(uint32_t done, uint32_t total);
+static void draw_progress(uint32_t done, uint32_t total, int what);
 
 static int error_text(int r)
 {
@@ -304,6 +307,7 @@ static int error_text(int r)
     case MP_ERR_FILE: return T_ERR_FILE;
     case MP_ERR_MEMORY: return T_ERR_MEMORY;
     case MP_ERR_FLASH: return T_ERR_FLASH;
+    case MP_ERR_NO_SF2: return T_ERR_NO_SF2;
     default: return T_ERR_FORMAT;
     }
 }
@@ -700,8 +704,11 @@ static void draw_playing(void)
             }
         }
         char s[96];
-        snprintf(s, sizeof(s), "%s %d/%d  %s %d/%d  %s %d/%d", T(T_POS), st.pos + 1, st.npos,
-                 T(T_ROW), st.row, st.nrows, T(T_TEMPO), st.speed, st.bpm);
+        if (st.midi)
+            snprintf(s, sizeof(s), "%s %d  %s %d bpm", T(T_VOICES), st.voices, T(T_TEMPO), st.bpm);
+        else
+            snprintf(s, sizeof(s), "%s %d/%d  %s %d/%d  %s %d/%d", T(T_POS), st.pos + 1, st.npos,
+                     T(T_ROW), st.row, st.nrows, T(T_TEMPO), st.speed, st.bpm);
         mp_text(8, 184, s, C_DIM, 304);
     }
 
@@ -781,11 +788,11 @@ const uint8_t *mp_core_canvas(const uint32_t **palette, int *ncolors)
 }
 
 /* the copy of the samples of a big module to the flash */
-static void draw_progress(uint32_t done, uint32_t total)
+static void draw_progress(uint32_t done, uint32_t total, int what)
 {
     mp_fill(0, 0, MP_WIDTH, MP_HEIGHT, C_BG);
     draw_header(T(T_TITLE));
-    const char *a = T(T_COPY), *b = T(T_COPY2);
+    const char *a = T(what == 1 ? T_COPY_SF2 : T_COPY), *b = T(T_COPY2);
     mp_text((MP_WIDTH - mp_text_width(a)) / 2, 90, a, C_TEXT, 316);
     mp_text((MP_WIDTH - mp_text_width(b)) / 2, 104, b, C_DIM, 316);
     mp_rect(39, 124, MP_WIDTH - 78, 12, C_LINE);

@@ -26,6 +26,7 @@
 
 #include "mp_platform.h"
 #include "mp_player.h"
+#include "mp_midi.h"
 
 #define MODULE_RATE 44100
 
@@ -73,6 +74,15 @@ static bool istarts(const char *s, const char *prefix)
     return true;
 }
 
+static int strcasecmp_l1(const char *a, const char *b)
+{
+    for (;; a++, b++) {
+        int c = tolower((unsigned char)*a) - tolower((unsigned char)*b);
+        if (c || !*a)
+            return c;
+    }
+}
+
 static bool is_module_name(const char *name)
 {
     const char *e = ext_of(name);
@@ -85,9 +95,15 @@ static bool is_mp3_name(const char *name)
     return ieq(ext_of(name), "mp3");
 }
 
+static bool is_midi_name(const char *name)
+{
+    const char *e = ext_of(name);
+    return ieq(e, "mid") || ieq(e, "midi") || ieq(e, "kar") || ieq(e, "rmi");
+}
+
 bool mp_player_is_music(const char *name)
 {
-    return is_module_name(name) || is_mp3_name(name);
+    return is_module_name(name) || is_mp3_name(name) || is_midi_name(name);
 }
 
 static const char *base_name(const char *path)
@@ -161,7 +177,7 @@ static int flash_append(void *opaque, const void *buf, unsigned int len)
     flash_done += len;
     if (flash_progress && (flash_done - flash_report >= gflash.total / 20 || flash_done == gflash.total)) {
         flash_report = flash_done;
-        flash_progress(flash_done, gflash.total);
+        flash_progress(flash_done, gflash.total, 0);
     }
     return 1;
 }
@@ -261,7 +277,7 @@ static int load_to_flash(const char *path)
         gflash.append = flash_append;
         flash_done = flash_report = 0;
         if (flash_progress)
-            flash_progress(0, total);
+            flash_progress(0, total, 0);
         mp_plat_log("mp: copying %lu bytes of samples to the flash\n", (unsigned long)total);
     }
     libxmp_gnw_flash_lo = gflash.base;
@@ -796,6 +812,171 @@ static void mp3_seek_ms(uint32_t ms)
 }
 
 /* ------------------------------------------------------------------ */
+/* MIDI                                                               */
+/* ------------------------------------------------------------------ */
+/* The SoundFont of a MIDI file: <name>.sf2 next to it, else the first
+ * .sf2 of its folder, else the first .sf2 of the music folder. */
+typedef struct {
+    char best[96];
+} sf2_find_t;
+
+static void sf2_cb(void *arg, const char *name, bool is_dir, uint32_t size)
+{
+    sf2_find_t *f = arg;
+    (void)size;
+    if (is_dir || !ieq(ext_of(name), "sf2") || name[0] == '.')
+        return;
+    if (!f->best[0] || strcasecmp_l1(name, f->best) < 0)
+        snprintf(f->best, sizeof(f->best), "%s", name);
+}
+
+static bool find_sf2(const char *midi_path, char *out, size_t size)
+{
+    char dir[256];
+    snprintf(dir, sizeof(dir), "%s", midi_path);
+    char *slash = strrchr(dir, '/');
+    if (!slash)
+        return false;
+    *slash = '\0';
+    /* <name>.sf2 */
+    snprintf(out, size, "%s", midi_path);
+    char *dot = strrchr(out, '.');
+    if (dot && dot > strrchr(out, '/')) {
+        snprintf(dot, size - (size_t)(dot - out), ".sf2");
+        FILE *f = fopen(out, "rb");
+        if (f) {
+            fclose(f);
+            return true;
+        }
+    }
+    sf2_find_t fd;
+    fd.best[0] = '\0';
+    mp_plat_list_dir(dir, sf2_cb, &fd);
+    if (fd.best[0]) {
+        snprintf(out, size, "%s/%s", dir, fd.best);
+        return true;
+    }
+    fd.best[0] = '\0';
+    mp_plat_list_dir(mp_plat_music_root(), sf2_cb, &fd);
+    if (fd.best[0]) {
+        snprintf(out, size, "%s/%s", mp_plat_music_root(), fd.best);
+        return true;
+    }
+    return false;
+}
+
+/* the whole SoundFont in the flash (copied once): its 16 bit samples are
+ * played from there */
+static const uint8_t *map_sf2(const char *path, uint32_t *size_out)
+{
+    FILE *f = fopen(path, "rb");
+    if (!f)
+        return NULL;
+    long size = file_size(f);
+    uint8_t *buf = mp_malloc(4096);
+    if (!buf || size < 12) {
+        mp_free(buf);
+        fclose(f);
+        return NULL;
+    }
+    size_t n = fread(buf, 1, 4096, f);
+    char key[96];
+    snprintf(key, sizeof(key), "sf2|%08lx|%ld|%.60s", (unsigned long)crc32_update(0, buf, n), size,
+             base_name(path));
+    uint32_t have = 0;
+    const uint8_t *blob = mp_plat_flash_lookup(key, &have);
+    if (blob && have == (uint32_t)size) {
+        mp_free(buf);
+        fclose(f);
+        *size_out = have;
+        return blob;
+    }
+    mp_plat_log("mp: copying the SoundFont %s to the flash (%ld bytes)\n", path, size);
+    blob = mp_plat_flash_begin(key, (uint32_t)size);
+    bool ok = blob != NULL;
+    uint32_t done = 0, report = 0;
+    fseek(f, 0, SEEK_SET);
+    if (flash_progress && ok)
+        flash_progress(0, (uint32_t)size, 1);
+    while (ok && done < (uint32_t)size) {
+        n = fread(buf, 1, 4096, f);
+        if (n == 0) {
+            ok = false;
+            break;
+        }
+        ok = mp_plat_flash_append(buf, (uint32_t)n);
+        done += (uint32_t)n;
+        if (flash_progress && (done - report >= (uint32_t)size / 20 || done == (uint32_t)size)) {
+            report = done;
+            flash_progress(done, (uint32_t)size, 1);
+        }
+    }
+    mp_free(buf);
+    fclose(f);
+    if (!ok) {
+        if (blob)
+            mp_plat_flash_abort();
+        return NULL;
+    }
+    blob = mp_plat_flash_finish();
+    *size_out = (uint32_t)size;
+    return blob;
+}
+
+static int midi_open(const char *path)
+{
+    char sf2[256];
+    if (!find_sf2(path, sf2, sizeof(sf2)))
+        return MP_ERR_NO_SF2;
+    FILE *f = fopen(path, "rb");
+    if (!f)
+        return MP_ERR_FILE;
+    long size = file_size(f);
+    if (size < 22 || (size_t)size > mp_heap_largest() / 2) {
+        fclose(f);
+        return size < 22 ? MP_ERR_FORMAT : MP_ERR_MEMORY;
+    }
+    uint8_t *data = mp_malloc((size_t)size);
+    if (!data) {
+        fclose(f);
+        return MP_ERR_MEMORY;
+    }
+    size_t n = fread(data, 1, (size_t)size, f);
+    fclose(f);
+    /* RIFF MIDI (.rmi): the SMF is in its "data" chunk */
+    uint32_t off = 0;
+    if (n > 20 && !memcmp(data, "RIFF", 4)) {
+        for (uint32_t i = 12; i + 8 < n && i < 256; i++)
+            if (!memcmp(data + i, "MThd", 4)) {
+                off = i;
+                break;
+            }
+        memmove(data, data + off, n - off);
+        n -= off;
+    }
+    uint32_t sf2_size = 0;
+    const uint8_t *sf = map_sf2(sf2, &sf2_size);
+    if (!sf) {
+        mp_free(data);
+        return MP_ERR_FLASH;
+    }
+    int r = mp_midi_open(data, (uint32_t)n, sf, sf2_size); /* keeps data */
+    if (r != MP_OK)
+        return r;
+    snprintf(info.title, sizeof(info.title), "%s", mp_midi_title());
+    trim(info.title);
+    if (!info.title[0])
+        title_from_name(path);
+    snprintf(info.artist, sizeof(info.artist), "%s", mp_midi_copyright());
+    trim(info.artist);
+    const char *sb = base_name(sf2);
+    snprintf(info.format, sizeof(info.format), "MIDI, %d tr, %.20s", mp_midi_tracks(), sb);
+    info.duration_ms = mp_midi_duration_ms();
+    out_rate = MP_MIDI_RATE;
+    return MP_OK;
+}
+
+/* ------------------------------------------------------------------ */
 /* API                                                                */
 /* ------------------------------------------------------------------ */
 int mp_player_open(const char *path, mp_progress_cb progress)
@@ -807,6 +988,9 @@ int mp_player_open(const char *path, mp_progress_cb progress)
     if (is_mp3_name(path)) {
         kind = MP_KIND_MP3;
         r = mp3_open(path);
+    } else if (is_midi_name(path)) {
+        kind = MP_KIND_MIDI;
+        r = midi_open(path);
     } else if (is_module_name(path)) {
         kind = MP_KIND_MODULE;
         r = module_open(path);
@@ -827,6 +1011,8 @@ void mp_player_close(void)
         module_close();
     else if (kind == MP_KIND_MP3)
         mp3_close();
+    else if (kind == MP_KIND_MIDI)
+        mp_midi_close();
     kind = MP_KIND_NONE;
     info.kind = MP_KIND_NONE;
 }
@@ -859,6 +1045,8 @@ int mp_player_render(int16_t *out, int frames, bool loop)
         }
         return n;
     }
+    if (kind == MP_KIND_MIDI)
+        return mp_midi_render(out, frames, loop);
     return 0;
 }
 
@@ -868,6 +1056,8 @@ uint32_t mp_player_position_ms(void)
         return fi.time > 0 ? (uint32_t)fi.time : 0;
     if (kind == MP_KIND_MP3)
         return mp3_position_ms();
+    if (kind == MP_KIND_MIDI)
+        return mp_midi_position_ms();
     return 0;
 }
 
@@ -884,6 +1074,9 @@ void mp_player_seek(int direction)
         uint32_t now = mp3_position_ms();
         uint32_t to = direction > 0 ? now + 10000 : (now > 10000 ? now - 10000 : 0);
         mp3_seek_ms(to);
+    } else if (kind == MP_KIND_MIDI) {
+        uint32_t now = mp_midi_position_ms();
+        mp_midi_seek_ms(direction > 0 ? now + 10000 : (now > 10000 ? now - 10000 : 0));
     }
 }
 
@@ -893,6 +1086,8 @@ uint32_t mp_player_locator(void)
         return (uint32_t)fi.pos;
     if (kind == MP_KIND_MP3)
         return mp3_position_ms();
+    if (kind == MP_KIND_MIDI)
+        return mp_midi_position_ms();
     return 0;
 }
 
@@ -906,13 +1101,26 @@ void mp_player_relocate(uint32_t locator)
     } else if (kind == MP_KIND_MP3) {
         if (locator > 0)
             mp3_seek_ms(locator);
+    } else if (kind == MP_KIND_MIDI) {
+        if (locator > 0)
+            mp_midi_seek_ms(locator);
     }
 }
 
 bool mp_player_module_status(mp_module_status_t *st)
 {
+    if (kind == MP_KIND_MIDI) {
+        memset(st, 0, sizeof(*st));
+        st->midi = true;
+        st->nch = 16;
+        st->voices = mp_midi_voices();
+        st->bpm = mp_midi_bpm();
+        mp_midi_levels(st->vu);
+        return true;
+    }
     if (kind != MP_KIND_MODULE)
         return false;
+    st->midi = false;
     struct xmp_module_info mi;
     xmp_get_module_info(xmp, &mi);
     st->pos = fi.pos;
