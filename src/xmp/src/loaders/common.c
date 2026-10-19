@@ -127,8 +127,93 @@ int libxmp_alloc_subinstrument(struct xmp_module *mod, int i, int num)
 	return 0;
 }
 
+#ifdef LIBXMP_GNW
+/*
+ * Game & Watch: identical tracks are shared. libxmp keeps every pattern as
+ * one track of 8 byte events per channel; most of them are empty or
+ * repeated (an 18 channel XM of 92 patterns: 1656 tracks, 258 different,
+ * 837 KB -> 129 KB). Once a pattern is complete (the loaders fill them in
+ * order: before the tracks of the next one are allocated, and at the end
+ * of the load), each of its tracks that equals an earlier one is freed
+ * and the pattern points to the earlier one. The loaders and the player
+ * only reach tracks through xxp[]->index[], and never write events after
+ * loading.
+ */
+static int gnw_done;		/* patterns already shared */
+static uint32 *gnw_hash;	/* hash of each track kept */
+
+static uint32 gnw_track_hash(const struct xmp_track *t)
+{
+	const uint8 *p = (const uint8 *)t->event;
+	size_t n = (size_t)t->rows * sizeof(struct xmp_event);
+	uint32 h = 2166136261u ^ (uint32)t->rows;
+	while (n--)
+		h = (h ^ *p++) * 16777619u;
+	return h;
+}
+
+static void gnw_share_pattern(struct xmp_module *mod, int p)
+{
+	int c, j;
+
+	if (mod->xxp[p] == NULL)
+		return;
+	for (c = 0; c < mod->chn; c++) {
+		int t = p * mod->chn + c;
+		struct xmp_track *tr;
+		if (t >= mod->trk || mod->xxp[p]->index[c] != t || (tr = mod->xxt[t]) == NULL)
+			continue;
+		gnw_hash[t] = gnw_track_hash(tr);
+		for (j = 0; j < t; j++) {
+			struct xmp_track *o = mod->xxt[j];
+			if (o != NULL && gnw_hash[j] == gnw_hash[t] && o->rows == tr->rows &&
+			    !memcmp(o->event, tr->event, (size_t)tr->rows * sizeof(struct xmp_event))) {
+				int k;
+				free(tr);
+				mod->xxt[t] = NULL;
+				/* every channel using it (the extra pattern of
+				 * the XM loader uses one track for all) */
+				for (k = 0; k < mod->chn; k++)
+					if (mod->xxp[p]->index[k] == t)
+						mod->xxp[p]->index[k] = j;
+				break;
+			}
+		}
+	}
+}
+
+/* shares the tracks of the patterns before `upto` (once each) */
+void libxmp_gnw_share_tracks(struct xmp_module *mod, int upto)
+{
+	if (gnw_hash == NULL || mod->xxt == NULL || mod->xxp == NULL)
+		return;
+#ifdef MP_HOST
+	if (getenv("MP_NO_SHARE"))	/* harness: compare with the stock code */
+		return;
+#endif
+	while (gnw_done < upto && gnw_done < mod->pat)
+		gnw_share_pattern(mod, gnw_done++);
+}
+
+/* end of a load: the last patterns, then the table goes */
+void libxmp_gnw_share_end(struct xmp_module *mod, int ok)
+{
+	if (ok)
+		libxmp_gnw_share_tracks(mod, mod->pat);
+	free(gnw_hash);
+	gnw_hash = NULL;
+	gnw_done = 0;
+}
+#endif
+
 int libxmp_init_pattern(struct xmp_module *mod)
 {
+#ifdef LIBXMP_GNW
+	free(gnw_hash);
+	gnw_done = 0;
+	gnw_hash = (uint32 *) calloc(mod->trk > 0 ? mod->trk : 1, sizeof(uint32));
+	/* no table: no sharing (the stock behaviour) */
+#endif
 	mod->xxt = (struct xmp_track **) calloc(mod->trk, sizeof(struct xmp_track *));
 	if (mod->xxt == NULL)
 		return -1;
@@ -175,6 +260,10 @@ int libxmp_alloc_tracks_in_pattern(struct xmp_module *mod, int num)
 	int i;
 
 	D_(D_INFO "Alloc %d tracks of %d rows", mod->chn, mod->xxp[num]->rows);
+#ifdef LIBXMP_GNW
+	/* the patterns before this one are complete */
+	libxmp_gnw_share_tracks(mod, num);
+#endif
 	for (i = 0; i < mod->chn; i++) {
 		int t = num * mod->chn + i;
 		int rows = mod->xxp[num]->rows;

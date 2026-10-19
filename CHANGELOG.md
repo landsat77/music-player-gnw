@@ -7,6 +7,16 @@ section as the GitHub Release notes.
 
 ## [Unreleased]
 
+## [v1.0.1] - 2026-10-19
+
+### Fixed
+
+- Modules with many channels and patterns could not load ("not a module",
+  out of memory), e.g. an 18 channel XM of 92 patterns: the identical
+  tracks of the patterns (empty channels, repeated parts) are now kept once.
+  That XM went from 837 KB of patterns to 129 KB; the sound is unchanged
+  (checked sample for sample).
+
 ## [v1.0.0] - 2026-10-19
 
 ### Added

@@ -255,6 +255,11 @@ static int load_module(xmp_context opaque, HIO_HANDLE *h)
 		}
 	}
 
+#ifdef LIBXMP_GNW
+	/* the last patterns: identical tracks shared (loaders/common.c) */
+	libxmp_gnw_share_end(mod, test_result == 0 && load_result >= 0);
+#endif
+
 	if (test_result < 0) {
 		xmp_release_module(opaque);
 		return -XMP_ERROR_FORMAT;

@@ -43,6 +43,16 @@ Watch Retro-Go SD).
 - `mixer.c`: the mixer buffer is not clamped to its stock 24585-sample
   minimum (saves ~100 KB).
 - `player.c`: the "invert loop" effect does nothing on read-only samples.
+- `loaders/common.c`, `load.c`: identical tracks are shared
+  (`libxmp_gnw_share_tracks()`): when a pattern is complete (before the
+  tracks of the next one are allocated, and at the end of the load), each
+  of its tracks equal to an earlier one is freed and the pattern's index
+  points to the earlier one (all channels using it: the XM loader's extra
+  pattern uses one track for all). The loaders fill patterns in order and
+  nothing writes events after loading. `_mercury.xm` (18 ch, 92 patterns):
+  1656 tracks / 837 KB -> 258 / 129 KB; before, the load failed even in
+  the first (SKIP) pass. Harness: `MP_NO_SHARE=1` disables it; outputs are
+  identical (mercury, data_jack, sundance, ZxxSecrets, swaptest).
 - `loaders/sample.c`, `loaders/it_load.c`: the flash cache of the big
   modules (below, `src/xmp/src/gnw.h`), and compressed mono IT samples
   decompressed straight into the sample's block (`SAMPLE_FLAG_GNW_ADOPT`:
@@ -94,8 +104,8 @@ Watch Retro-Go SD).
   and `stat()` are implemented in `mp_libc.c` (libxmp needs them).
 - libxmp-lite does not load "FEST" MODs (Gaffeltruck.mod), TDZ3 / CD81
   magics, nor the formats outside MOD/S3M/XM/IT.
-- Memory: libxmp keeps patterns as tracks (8 bytes per event): an 8
-  channel S3M of 176 KB takes ~450 KB loaded (data_jack.s3m). The heap is
+- Memory: libxmp keeps patterns as tracks (8 bytes per event), shared when
+  identical: data_jack.s3m (8 ch, 176 KB) takes ~380 KB loaded. The heap is
   ~880 KB in 4 regions; the canvas (77 KB) goes to the LCD pool (best fit).
 
 ## History

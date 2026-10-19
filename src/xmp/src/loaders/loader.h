@@ -34,6 +34,10 @@ int	libxmp_init_instrument		(struct module_data *);
 int	libxmp_realloc_samples		(struct module_data *, int);
 int	libxmp_alloc_subinstrument	(struct xmp_module *, int, int);
 int	libxmp_init_pattern		(struct xmp_module *);
+#ifdef LIBXMP_GNW
+void	libxmp_gnw_share_tracks		(struct xmp_module *, int);
+void	libxmp_gnw_share_end		(struct xmp_module *, int);
+#endif
 int	libxmp_alloc_pattern		(struct xmp_module *, int);
 int	libxmp_alloc_track		(struct xmp_module *, int, int);
 int	libxmp_alloc_tracks_in_pattern	(struct xmp_module *, int);
